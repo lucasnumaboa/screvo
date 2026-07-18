@@ -45,6 +45,8 @@ pyinstaller ^
     --collect-all "sherpa_onnx" ^
     --collect-all "pyaudiowpatch" ^
     --collect-all "numpy" ^
+    --collect-all "docx" ^
+    --collect-all "reportlab" ^
     --hidden-import "PIL" ^
     --hidden-import "PyQt6.QtWidgets" ^
     --hidden-import "PyQt6.QtCore" ^
@@ -55,8 +57,6 @@ pyinstaller ^
     --exclude-module "winocr" ^
     --exclude-module "winrt" ^
     --exclude-module "llama_cpp" ^
-    --exclude-module "docx" ^
-    --exclude-module "reportlab" ^
     --exclude-module "pytesseract" ^
     main.py
 

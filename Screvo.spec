@@ -10,6 +10,10 @@ tmp_ret = collect_all('pyaudiowpatch')
 datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
 tmp_ret = collect_all('numpy')
 datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
+tmp_ret = collect_all('docx')
+datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
+tmp_ret = collect_all('reportlab')
+datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
 
 
 a = Analysis(
@@ -21,7 +25,7 @@ a = Analysis(
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
-    excludes=['winocr', 'winrt', 'llama_cpp', 'docx', 'reportlab', 'pytesseract'],
+    excludes=['winocr', 'winrt', 'llama_cpp', 'pytesseract'],
     noarchive=False,
     optimize=0,
 )

@@ -92,9 +92,10 @@ build.bat            :: gera dist/Screvo.exe (PyInstaller)
 build_installer.bat  :: gera o instalador (requer Inno Setup)
 ```
 
-> No `.exe` empacotado, as instalações automáticas de `winocr`, `python-docx` e
-> `reportlab` não ocorrem — inclua-as no `.spec`/`requirements` se quiser OCR e
-> exportação docx/pdf no executável final.
+> A exportação **.docx/.pdf** já vai empacotada no `.exe`. O **OCR** (`winocr`)
+> e a **IA local** (`llama-cpp-python`) ficam de fora do executável (o `winrt`
+> não empacota bem e o motor de IA é grande) — essas duas funcionam rodando a
+> partir do código-fonte.
 
 ---
 
