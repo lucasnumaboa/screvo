@@ -1,0 +1,28 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# PyInstaller / build
+build/
+dist/
+*.manifest
+
+# Instalador
+installer_output/
+
+# Gravações e transcrições
+video/
+*.mp4
+*.mkv
+*.avi
+*.webm
+
+# Arquivos temporários
+screvo_icon_preview.png
+*.log
+
+# Binários do FFmpeg (grandes demais para o GitHub — baixe à parte)
+ffmpeg/bin/*.exe

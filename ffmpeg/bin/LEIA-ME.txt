@@ -1,0 +1,14 @@
+Coloque aqui os binários do FFmpeg:
+
+    ffmpeg.exe
+    ffprobe.exe
+
+Eles NÃO são versionados no Git porque cada um passa de 100 MB (limite do GitHub).
+
+Como obter (Windows):
+1. Baixe uma build do FFmpeg em https://www.gyan.dev/ffmpeg/builds/
+   (por exemplo o pacote "release full" ou "essentials").
+2. Extraia e copie ffmpeg.exe e ffprobe.exe do "bin" da build para esta pasta
+   (ffmpeg/bin/).
+
+Depois disso o Screvo encontra o FFmpeg automaticamente.

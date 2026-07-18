@@ -1,0 +1,9 @@
+PyQt6>=6.6.0
+keyboard>=0.13.5
+screeninfo>=0.8.1
+Pillow>=10.0.0
+requests>=2.31.0
+PyAudioWPatch>=0.2.12.7
+sherpa-onnx>=1.10.0
+numpy>=1.24.0
+pyinstaller>=6.0.0
