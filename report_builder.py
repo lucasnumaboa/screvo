@@ -157,10 +157,98 @@ def build_report(video_path, segments, ocr_text, provider, model, api_key,
 
     md = FRAME_RE.sub(_repl, md)
 
+    # Fallback: se a IA não inseriu NENHUMA captura (comum em modelos locais
+    # pequenos), inserimos uma imagem em cada BLOCO DE TEMPO citado no texto —
+    # inline, logo após a linha — espalhando conforme os blocos do relatório.
+    if counter["i"] == 0:
+        if status_cb:
+            status_cb("Adicionando capturas automaticamente...")
+        duration = 0.0
+        if segments:
+            duration = max((s.get("end", 0) for s in segments), default=0.0)
+        for mm in re.finditer(r"(\d{1,2}):(\d{2})", ocr_text or ""):
+            duration = max(duration, int(mm.group(1)) * 60 + int(mm.group(2)))
+
+        md = _insert_frames_by_text(md, video_path, imgs_dir, imgs_dirname,
+                                    duration, counter, status_cb)
+
+        # Se o texto não tinha nenhum tempo, distribui capturas pela duração.
+        if counter["i"] == 0:
+            times = _uniform_times(duration)
+            if times:
+                os.makedirs(imgs_dir, exist_ok=True)
+                gallery = ["\n\n## 📸 Capturas do vídeo\n"]
+                for t in times:
+                    counter["i"] += 1
+                    fname = f"frame_{counter['i']:02d}.png"
+                    out = os.path.join(imgs_dir, fname)
+                    try:
+                        if extract_frame(video_path, t, out):
+                            gallery.append(
+                                f"**{_mmss(t)}**\n\n"
+                                f"![Momento {_mmss(t)}]({imgs_dirname}/{fname})\n"
+                            )
+                    except Exception:
+                        pass
+                if len(gallery) > 1:
+                    md = md.rstrip() + "\n" + "\n".join(gallery) + "\n"
+
     report_path = os.path.join(base_dir, base + "_relatorio.md")
     with open(report_path, "w", encoding="utf-8") as f:
         f.write(md)
     return report_path
+
+
+def _insert_frames_by_text(md, video_path, imgs_dir, imgs_dirname, duration,
+                           counter, status_cb, max_n=8):
+    """Insere uma captura logo após cada linha que cita um tempo (mm:ss).
+
+    Usa o 1º tempo da linha (início do bloco). Evita duplicar tempos próximos
+    e respeita a duração do vídeo.
+    """
+    ts_re = re.compile(r"(\d{1,2}):(\d{2})")
+    out = []
+    used = []
+
+    def _ok(t):
+        if duration and t > duration + 2:
+            return False
+        return all(abs(u - t) >= 3 for u in used)
+
+    for line in md.splitlines():
+        out.append(line)
+        if counter["i"] >= max_n:
+            continue
+        m = ts_re.search(line)
+        if not m:
+            continue
+        t = int(m.group(1)) * 60 + int(m.group(2))
+        if not _ok(t):
+            continue
+        counter["i"] += 1
+        fname = f"frame_{counter['i']:02d}.png"
+        os.makedirs(imgs_dir, exist_ok=True)
+        outp = os.path.join(imgs_dir, fname)
+        if status_cb:
+            status_cb(f"Capturando frame em {_mmss(t)}...")
+        try:
+            if extract_frame(video_path, t, outp):
+                out.append(f"\n![Momento {_mmss(t)}]({imgs_dirname}/{fname})\n")
+                used.append(t)
+            else:
+                counter["i"] -= 1
+        except Exception:
+            counter["i"] -= 1
+    return "\n".join(out)
+
+
+def _uniform_times(duration, n=5):
+    """Tempos distribuídos uniformemente pela duração (fallback)."""
+    if not duration or duration <= 2:
+        return []
+    n = min(n, 5)
+    step = duration / (n + 1)
+    return [round(step * (i + 1), 1) for i in range(n)]
 
 
 class ReportWorker(QThread):

@@ -168,7 +168,12 @@ class TextViewerDialog(QDialog):
 
     def _open_external(self):
         if self._file_path and os.path.isfile(self._file_path):
-            try:
-                os.startfile(self._file_path)
-            except Exception:
-                pass
+            import threading
+
+            def _open():
+                try:
+                    os.startfile(self._file_path)
+                except Exception:
+                    pass
+
+            threading.Thread(target=_open, daemon=True).start()

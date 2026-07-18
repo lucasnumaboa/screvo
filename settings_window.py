@@ -1566,7 +1566,7 @@ class SettingsWindow(QMainWindow):
             if hasattr(self, '_transcribing_video') and self._transcribing_video == filepath:
                 desc += "  •  Transcrevendo..."
 
-            audio_bar = AudioPlayerBar(filepath)
+            audio_bar = AudioPlayerBar(filepath, self)
             card.add_row(self._make_list_row(f, desc, btns_widget, audio_bar))
 
         self.videos_container.addWidget(card)
@@ -2190,9 +2190,27 @@ class SettingsWindow(QMainWindow):
         except Exception:
             pass
 
-    def _open_file(self, path):
+    @staticmethod
+    def _open_path_async(path):
+        """Abre um arquivo/pasta sem bloquear a interface.
+
+        os.startfile (ShellExecute) pode travar a thread principal quando o
+        shell está ocupado (ex.: com o player de áudio ativo). Rodamos numa
+        thread separada para a UI não congelar.
+        """
         import os
-        os.startfile(path)
+        import threading
+
+        def _open():
+            try:
+                os.startfile(path)
+            except Exception:
+                pass
+
+        threading.Thread(target=_open, daemon=True).start()
+
+    def _open_file(self, path):
+        self._open_path_async(path)
 
     def _view_text(self, path, is_markdown=False, title=None):
         """Abre uma janela interna exibindo o conteúdo do arquivo (texto/Markdown)."""
@@ -2364,11 +2382,88 @@ class SettingsWindow(QMainWindow):
         self.transcribe_status.setStyleSheet("color: #D32F2F; font-size: 12px; font-weight: 600;")
         QMessageBox.critical(self, "Erro no Relatório", msg)
 
+    # =================== ÁUDIO (player único, persistente) ===================
+    def _ensure_audio_player(self):
+        if getattr(self, "_audio_player", None) is None:
+            from PyQt6.QtMultimedia import QMediaPlayer, QAudioOutput
+            self._audio_out = QAudioOutput()
+            self._audio_player = QMediaPlayer()
+            self._audio_player.setAudioOutput(self._audio_out)
+            self._audio_player.positionChanged.connect(self._audio_on_pos)
+            self._audio_player.durationChanged.connect(self._audio_on_dur)
+            self._audio_player.playbackStateChanged.connect(self._audio_on_state)
+            self._audio_bar = None
+            self._audio_path = None
+        return self._audio_player
+
+    def play_audio_toggle(self, bar, path):
+        from PyQt6.QtMultimedia import QMediaPlayer
+        from PyQt6.QtCore import QUrl
+        p = self._ensure_audio_player()
+        if self._audio_path != path:
+            # Troca de faixa
+            self._reset_audio_bar()
+            self._audio_bar = bar
+            self._audio_path = path
+            p.setSource(QUrl.fromLocalFile(path))
+            p.play()
+        else:
+            self._audio_bar = bar
+            if p.playbackState() == QMediaPlayer.PlaybackState.PlayingState:
+                p.pause()
+            else:
+                p.play()
+
+    def audio_seek(self, pos):
+        p = getattr(self, "_audio_player", None)
+        if p is not None:
+            p.setPosition(pos)
+
+    def bind_existing_audio(self, bar, path):
+        """Ao recriar a lista, reflete o estado se esta faixa é a que toca."""
+        from PyQt6.QtMultimedia import QMediaPlayer
+        p = getattr(self, "_audio_player", None)
+        if p is not None and getattr(self, "_audio_path", None) == path:
+            self._audio_bar = bar
+            try:
+                bar.set_range(p.duration())
+                bar.set_position(p.position(), p.duration())
+                bar.set_playing(
+                    p.playbackState() == QMediaPlayer.PlaybackState.PlayingState
+                )
+            except RuntimeError:
+                self._audio_bar = None
+
+    def _reset_audio_bar(self):
+        self._safe_audio_bar(lambda b: b.set_playing(False))
+
+    def _safe_audio_bar(self, fn):
+        b = getattr(self, "_audio_bar", None)
+        if b is None:
+            return
+        try:
+            fn(b)
+        except RuntimeError:
+            # A barra (widget) foi destruída na recriação da lista.
+            self._audio_bar = None
+
+    def _audio_on_pos(self, pos):
+        p = self._audio_player
+        self._safe_audio_bar(lambda b: b.set_position(pos, p.duration()))
+
+    def _audio_on_dur(self, dur):
+        self._safe_audio_bar(lambda b: b.set_range(dur))
+
+    def _audio_on_state(self, state):
+        from PyQt6.QtMultimedia import QMediaPlayer
+        playing = state == QMediaPlayer.PlaybackState.PlayingState
+        self._safe_audio_bar(lambda b: b.set_playing(playing))
+
     def _open_output_folder(self):
         import os
         folder = self._current_folder()
         if os.path.isdir(folder):
-            os.startfile(folder)
+            self._open_path_async(folder)
 
     def _load_settings(self):
         """Carrega configurações nos widgets."""

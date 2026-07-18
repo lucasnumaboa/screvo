@@ -8,6 +8,9 @@ import threading
 from PyQt6.QtWidgets import QApplication, QSystemTrayIcon, QMenu
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal, QObject
 from PyQt6.QtGui import QIcon, QPixmap, QPainter, QColor, QAction
+from PyQt6.QtNetwork import QLocalServer, QLocalSocket
+
+SINGLE_INSTANCE_KEY = "ScrevoSingleInstance_v1"
 
 from config import Config, get_ffmpeg_path
 from recorder import Recorder
@@ -33,6 +36,11 @@ class ScrevoApp:
         self.app.setQuitOnLastWindowClosed(False)
         self.app.setApplicationName("Screvo")
         self.app.setWindowIcon(make_app_icon(256))
+
+        # Instância única: se já houver um Screvo aberto, avisa ele para
+        # aparecer e encerra esta segunda instância.
+        if not self._acquire_single_instance():
+            sys.exit(0)
 
         # Config
         self.config = Config()
@@ -92,6 +100,38 @@ class ScrevoApp:
                 "FFmpeg não foi encontrado.\n"
                 "Verifique se está na pasta ffmpeg/bin/ do aplicativo ou no PATH do sistema."
             )
+
+    def _acquire_single_instance(self):
+        """True se esta for a 1ª instância; False se já existe outra rodando."""
+        sock = QLocalSocket()
+        sock.connectToServer(SINGLE_INSTANCE_KEY)
+        if sock.waitForConnected(300):
+            # Já existe uma instância — pede para ela aparecer e sai.
+            try:
+                sock.write(b"show")
+                sock.flush()
+                sock.waitForBytesWritten(300)
+                sock.disconnectFromServer()
+            except Exception:
+                pass
+            return False
+
+        # Vira o "servidor" da instância única.
+        QLocalServer.removeServer(SINGLE_INSTANCE_KEY)  # limpa resíduo antigo
+        self._single_server = QLocalServer()
+        self._single_server.listen(SINGLE_INSTANCE_KEY)
+        self._single_server.newConnection.connect(self._on_single_instance_ping)
+        return True
+
+    def _on_single_instance_ping(self):
+        """Uma 2ª tentativa de abrir chegou — traz a janela para frente."""
+        conn = self._single_server.nextPendingConnection()
+        if conn:
+            try:
+                conn.readAll()
+            except Exception:
+                pass
+        self._show_settings()
 
     def _create_tray_icon(self):
         """Ícone do app (Screvo) para a bandeja."""

@@ -3,7 +3,7 @@ from PyInstaller.utils.hooks import collect_all
 
 datas = [('ffmpeg\\bin\\ffmpeg.exe', 'ffmpeg\\bin'), ('ffmpeg\\bin\\ffprobe.exe', 'ffmpeg\\bin'), ('icon.png', '.')]
 binaries = []
-hiddenimports = ['screeninfo', 'keyboard', 'requests', 'pyaudiowpatch', 'sherpa_onnx', 'numpy', 'PIL', 'PyQt6.QtWidgets', 'PyQt6.QtCore', 'PyQt6.QtGui', 'PyQt6.QtMultimedia', 'PyQt6.QtMultimediaWidgets']
+hiddenimports = ['screeninfo', 'keyboard', 'requests', 'pyaudiowpatch', 'sherpa_onnx', 'numpy', 'PIL', 'PyQt6.QtWidgets', 'PyQt6.QtCore', 'PyQt6.QtGui', 'PyQt6.QtMultimedia', 'PyQt6.QtMultimediaWidgets', 'PyQt6.QtNetwork']
 tmp_ret = collect_all('sherpa_onnx')
 datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
 tmp_ret = collect_all('pyaudiowpatch')

@@ -51,6 +51,7 @@ pyinstaller ^
     --hidden-import "PyQt6.QtGui" ^
     --hidden-import "PyQt6.QtMultimedia" ^
     --hidden-import "PyQt6.QtMultimediaWidgets" ^
+    --hidden-import "PyQt6.QtNetwork" ^
     --exclude-module "winocr" ^
     --exclude-module "winrt" ^
     --exclude-module "llama_cpp" ^
