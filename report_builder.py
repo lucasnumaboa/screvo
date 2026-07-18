@@ -184,14 +184,17 @@ class ReportWorker(QThread):
             seg_path = base + ".segments.json"
             tela_path = base + "_tela.txt"
 
-            # 1) Transcrição
+            # 1) Transcrição (não fatal — se falhar, segue só com o OCR)
             if not (os.path.isfile(txt_path) and os.path.isfile(seg_path)):
                 self.status.emit("Etapa 1/3 — Transcrevendo áudio...")
-                from local_transcriber import LocalTranscriber
-                lt = LocalTranscriber(config=None)
-                lt.status.connect(self.status)
-                lt.progress.connect(self.progress)
-                lt.transcribe_sync(self.video_path)
+                try:
+                    from local_transcriber import LocalTranscriber
+                    lt = LocalTranscriber(config=None)
+                    lt.status.connect(self.status)
+                    lt.progress.connect(self.progress)
+                    lt.transcribe_sync(self.video_path)
+                except Exception:
+                    self.status.emit("Transcrição indisponível (seguindo sem áudio)...")
 
             segments = []
             if os.path.isfile(seg_path):
@@ -201,15 +204,18 @@ class ReportWorker(QThread):
                 except Exception:
                     segments = []
 
-            # 2) OCR da tela
+            # 2) OCR da tela (não fatal)
             if not os.path.isfile(tela_path):
                 self.status.emit("Etapa 2/3 — Lendo texto da tela (OCR)...")
-                import ocr_screen
-                ocr_screen.run_ocr(
-                    self.video_path,
-                    status_cb=self.status.emit,
-                    progress_cb=self.progress.emit,
-                )
+                try:
+                    import ocr_screen
+                    ocr_screen.run_ocr(
+                        self.video_path,
+                        status_cb=self.status.emit,
+                        progress_cb=self.progress.emit,
+                    )
+                except Exception:
+                    self.status.emit("OCR indisponível (seguindo sem texto da tela)...")
             ocr_text = ""
             if os.path.isfile(tela_path):
                 try:
@@ -217,6 +223,13 @@ class ReportWorker(QThread):
                         ocr_text = f.read()
                 except Exception:
                     ocr_text = ""
+
+            # Precisa de pelo menos uma fonte de conteúdo
+            if not segments and not ocr_text.strip():
+                raise RuntimeError(
+                    "Não foi possível obter transcrição nem texto de tela do "
+                    "vídeo, então não há conteúdo para o relatório."
+                )
 
             # 3) Relatório
             self.status.emit("Etapa 3/3 — Montando relatório...")

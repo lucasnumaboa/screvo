@@ -212,16 +212,28 @@ class LocalTranscriber(QObject):
         total_chunks = max(1, (n + window - 1) // window)
         parts = []
         segments = []
+        # Pedaços muito curtos (o "resto" do fim, ou trechos minúsculos) não
+        # geram frames suficientes e fazem o encoder do ONNX falhar
+        # (Invalid input shape {0,128}). Garantimos um mínimo com padding.
+        min_samples = max(1, int(0.3 * sr))
         self.status.emit("Transcrevendo com Parakeet...")
         for idx in range(total_chunks):
             chunk = samples[idx * window:(idx + 1) * window]
             if len(chunk) == 0:
+                self.progress.emit(idx + 1, total_chunks)
                 continue
-            stream = recognizer.create_stream()
-            stream.accept_waveform(sr, chunk)
-            recognizer.decode_stream(stream)
-            result = stream.result
-            txt = (result.text or "").strip()
+            if len(chunk) < min_samples:
+                chunk = np.pad(chunk, (0, min_samples - len(chunk)))
+            try:
+                stream = recognizer.create_stream()
+                stream.accept_waveform(sr, chunk)
+                recognizer.decode_stream(stream)
+                result = stream.result
+                txt = (result.text or "").strip()
+            except Exception:
+                # Um pedaço problemático não deve derrubar a transcrição inteira
+                self.progress.emit(idx + 1, total_chunks)
+                continue
             if txt:
                 parts.append(txt)
                 offset = idx * win_sec

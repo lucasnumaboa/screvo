@@ -32,7 +32,7 @@ overlay flutuante e ícone na bandeja.
 - ⏱️ **Timestamps clicáveis** — no player, clique num trecho para pular ao momento.
 - 👥 **Identificação de falantes** (diarização) — opcional (best-effort).
 - 🖥️ **OCR da tela** — extrai o texto exibido no vídeo (slides, código, erros) para `*_tela.txt`.
-- 🎵 **Extrair áudio** do vídeo para `.mp3`.
+- 🎵 **Player de áudio embutido** em cada vídeo (ouve o áudio direto na lista).
 
 ### IA
 - 🤖 Provedor à escolha: **Gemini, Claude, OpenAI ou DeepSeek**.

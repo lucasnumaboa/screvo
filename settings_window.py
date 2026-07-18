@@ -24,7 +24,8 @@ from text_viewer import TextViewerDialog
 from icons import make_icon, make_app_icon
 from chat_dialog import ChatDialog
 from ocr_screen import OcrWorker
-from report_builder import AudioExtractWorker, ReportWorker
+from report_builder import ReportWorker
+from audio_player_bar import AudioPlayerBar
 import summary_templates
 
 # Sufixos dos arquivos associados a um vídeo (base = nome sem extensão)
@@ -982,9 +983,12 @@ class SettingsWindow(QMainWindow):
             return os.path.join(root, group)
         return root
 
-    def _make_list_row(self, title, desc, flow_widget):
+    def _make_list_row(self, title, desc, flow_widget, extra_widget=None):
         """Linha de lista responsiva: título + descrição em cima, botões
-        (FlowWidget) embaixo, quebrando de linha em janelas estreitas."""
+        (FlowWidget) embaixo, quebrando de linha em janelas estreitas.
+
+        extra_widget (opcional) é adicionado abaixo dos botões (ex.: player).
+        """
         row = QFrame()
         row.setStyleSheet(
             "QFrame { background: transparent; padding: 10px 16px; }"
@@ -1006,6 +1010,8 @@ class SettingsWindow(QMainWindow):
             v.addWidget(desc_lbl)
 
         v.addWidget(flow_widget)
+        if extra_widget is not None:
+            v.addWidget(extra_widget)
         return row
 
     def _refresh_videos_list(self):
@@ -1265,18 +1271,6 @@ class SettingsWindow(QMainWindow):
                 chat_btn.setToolTip("Crie a legenda antes de conversar com a IA")
             btns_widget.add_widget(chat_btn)
 
-            # Botão Extrair Áudio
-            audio_btn = QPushButton("Extrair Áudio")
-            audio_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-            audio_btn.setStyleSheet(
-                "QPushButton { background: #FFF8E1; border: 1px solid #FFE082; "
-                "border-radius: 8px; padding: 6px 12px; font-size: 11px; "
-                "color: #F57F17; font-weight: 500; }"
-                "QPushButton:hover { background: #FFECB3; }"
-            )
-            audio_btn.clicked.connect(lambda checked, p=path: self._extract_audio_video(p))
-            btns_widget.add_widget(audio_btn)
-
             # Botão Relatório Completo (ou Ver Relatório se já existe)
             report_path = os.path.join(folder, video_name + "_relatorio.md")
             if os.path.isfile(report_path):
@@ -1340,7 +1334,8 @@ class SettingsWindow(QMainWindow):
             if hasattr(self, '_transcribing_video') and self._transcribing_video == filepath:
                 desc += "  •  Transcrevendo..."
 
-            card.add_row(self._make_list_row(f, desc, btns_widget))
+            audio_bar = AudioPlayerBar(filepath)
+            card.add_row(self._make_list_row(f, desc, btns_widget, audio_bar))
 
         self.videos_container.addWidget(card)
 
@@ -2058,40 +2053,7 @@ class SettingsWindow(QMainWindow):
         self.transcribe_status.setStyleSheet("color: #D32F2F; font-size: 12px; font-weight: 600;")
         QMessageBox.critical(self, "Erro no OCR", msg)
 
-    # =================== ÁUDIO / RELATÓRIO ===================
-    def _extract_audio_video(self, video_path):
-        """Extrai o áudio do vídeo para um arquivo .mp3."""
-        import os
-        self.transcribe_status.show()
-        self.transcribe_progress.show()
-        self.transcribe_progress.setRange(0, 0)
-        self.transcribe_status.setText("Extraindo áudio...")
-        self.transcribe_status.setStyleSheet("color: #F57F17; font-size: 12px; font-weight: 600;")
-
-        self._audio_worker = AudioExtractWorker(video_path, "mp3")
-        self._audio_worker.finished_ok.connect(self._on_audio_finished)
-        self._audio_worker.failed.connect(self._on_audio_error)
-        self._audio_worker.start()
-
-    def _on_audio_finished(self, out_path, video_path):
-        import os
-        self.transcribe_progress.setRange(0, 100)
-        self.transcribe_progress.hide()
-        self.transcribe_status.setText(f"Áudio salvo: {os.path.basename(out_path)}")
-        self.transcribe_status.setStyleSheet("color: #2E7D32; font-size: 12px; font-weight: 600;")
-        from PyQt6.QtCore import QTimer
-        QTimer.singleShot(5000, lambda: (
-            self.transcribe_status.hide(),
-            self.transcribe_status.setStyleSheet("color: #FF69B4; font-size: 12px;")
-        ))
-
-    def _on_audio_error(self, msg, video_path=None):
-        self.transcribe_progress.setRange(0, 100)
-        self.transcribe_progress.hide()
-        self.transcribe_status.setText(f"Erro ao extrair áudio: {msg}")
-        self.transcribe_status.setStyleSheet("color: #D32F2F; font-size: 12px; font-weight: 600;")
-        QMessageBox.critical(self, "Erro ao Extrair Áudio", msg)
-
+    # =================== RELATÓRIO ===================
     def _view_report(self, report_path, video_name):
         """Abre o relatório (Markdown com imagens) no visualizador."""
         import os

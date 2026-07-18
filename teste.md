@@ -61,9 +61,11 @@ Marque cada item conforme testar.
 > automaticamente do código-fonte) ou o **Tesseract** se estiver instalado.
 > Se nenhum motor estiver disponível, mostra uma mensagem explicando como instalar.
 
-## 9. Extrair áudio
-- [ ] Botão **Extrair Áudio** em cada vídeo → gera um `.mp3` com o mesmo nome, na mesma pasta.
-- [ ] Mensagem "Áudio salvo: ...".
+## 9. Player de áudio embutido
+- [ ] Em cada vídeo, abaixo dos botões, aparece a barra **▶ Ouvir áudio** com slider e tempo.
+- [ ] Clicar em **Ouvir áudio** reproduz o áudio do vídeo ali mesmo (vira **⏸ Pausar**).
+- [ ] O slider mostra o progresso e permite arrastar para navegar.
+- [ ] (O botão antigo "Extrair Áudio" foi removido.)
 
 ## 10. Relatório Completo
 - [ ] Botão **★ Relatório Completo** num vídeo.
