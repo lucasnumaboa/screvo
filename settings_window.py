@@ -796,42 +796,7 @@ class SettingsWindow(QMainWindow):
             "Serviço usado para gerar o resumo das legendas"
         ))
 
-        # Modelo
-        self.ia_model_input = QLineEdit(self.config.get("ia_model", ""))
-        self.ia_model_input.setMinimumWidth(220)
-        self.ia_model_input.setStyleSheet(
-            "QLineEdit { background-color: #F5F5F5; border: 1px solid #E8E8E8; "
-            "border-radius: 8px; padding: 8px 12px; font-size: 12px; }"
-            "QLineEdit:focus { border-color: #FF69B4; background: white; }"
-        )
-        self._update_ia_model_placeholder()
-        self.ia_model_input.textChanged.connect(
-            lambda v: self._save_setting("ia_model", v.strip())
-        )
-        card.add_row(SettingRow(
-            "Modelo", self.ia_model_input,
-            "Nome do modelo. Deixe em branco para usar o padrão do provedor."
-        ))
-
-        # API Key
-        self.ia_key_input = QLineEdit(self.config.get("ia_api_key", ""))
-        self.ia_key_input.setMinimumWidth(220)
-        self.ia_key_input.setEchoMode(QLineEdit.EchoMode.Password)
-        self.ia_key_input.setStyleSheet(
-            "QLineEdit { background-color: #F5F5F5; border: 1px solid #E8E8E8; "
-            "border-radius: 8px; padding: 8px 12px; font-size: 12px; }"
-            "QLineEdit:focus { border-color: #FF69B4; background: white; }"
-        )
-        self.ia_key_input.setPlaceholderText("Cole aqui a sua API key")
-        self.ia_key_input.textChanged.connect(
-            lambda v: self._save_setting("ia_api_key", v.strip())
-        )
-        card.add_row(SettingRow(
-            "API Key", self.ia_key_input,
-            "Sua chave fica salva apenas neste computador."
-        ))
-
-        # Template de resumo
+        # Template de resumo (vale para todos os provedores)
         self.ia_template_combo = QComboBox()
         self.ia_template_combo.setMinimumWidth(220)
         for key, label in summary_templates.labels():
@@ -848,15 +813,52 @@ class SettingsWindow(QMainWindow):
 
         layout.addWidget(card)
 
+        # ---------- PROVEDOR PAGO (modelo + API key) ----------
+        self._paid_card = SettingCard()
+
+        self.ia_model_input = QLineEdit(self.config.get("ia_model", ""))
+        self.ia_model_input.setMinimumWidth(220)
+        self.ia_model_input.setStyleSheet(
+            "QLineEdit { background-color: #F5F5F5; border: 1px solid #E8E8E8; "
+            "border-radius: 8px; padding: 8px 12px; font-size: 12px; }"
+            "QLineEdit:focus { border-color: #FF69B4; background: white; }"
+        )
+        self._update_ia_model_placeholder()
+        self.ia_model_input.textChanged.connect(self._on_ia_model_input_changed)
+        self._paid_card.add_row(SettingRow(
+            "Modelo", self.ia_model_input,
+            "Nome do modelo. Deixe em branco para usar o padrão do provedor."
+        ))
+
+        self.ia_key_input = QLineEdit(self.config.get("ia_api_key", ""))
+        self.ia_key_input.setMinimumWidth(220)
+        self.ia_key_input.setEchoMode(QLineEdit.EchoMode.Password)
+        self.ia_key_input.setStyleSheet(
+            "QLineEdit { background-color: #F5F5F5; border: 1px solid #E8E8E8; "
+            "border-radius: 8px; padding: 8px 12px; font-size: 12px; }"
+            "QLineEdit:focus { border-color: #FF69B4; background: white; }"
+        )
+        self.ia_key_input.setPlaceholderText("Cole aqui a sua API key")
+        self.ia_key_input.textChanged.connect(
+            lambda v: self._save_setting("ia_api_key", v.strip())
+        )
+        self._paid_card.add_row(SettingRow(
+            "API Key", self.ia_key_input,
+            "Sua chave fica salva apenas neste computador."
+        ))
+
+        layout.addWidget(self._paid_card)
+
         # ---------- IA LOCAL (NO APP · GEMMA) ----------
-        layout.addWidget(SectionTitle("IA LOCAL NO APP · GEMMA"))
-        local_card = SettingCard()
+        self._local_title = SectionTitle("IA LOCAL NO APP · GEMMA")
+        layout.addWidget(self._local_title)
+        self._local_card = SettingCard()
 
         # Hardware detectado
         self.gpu_label = QLabel("Detectando hardware...")
         self.gpu_label.setStyleSheet("font-size: 12px; color: #666;")
         self.gpu_label.setWordWrap(True)
-        local_card.add_row(SettingRow("Seu computador", self.gpu_label))
+        self._local_card.add_row(SettingRow("Seu computador", self.gpu_label))
 
         # Modelo Gemma (local)
         self.local_model_combo = QComboBox()
@@ -867,7 +869,7 @@ class SettingsWindow(QMainWindow):
         if _cm >= 0:
             self.local_model_combo.setCurrentIndex(_cm)
         self.local_model_combo.currentIndexChanged.connect(self._on_local_model_changed)
-        local_card.add_row(SettingRow(
+        self._local_card.add_row(SettingRow(
             "Modelo (Gemma)", self.local_model_combo,
             "Roda por CPU no próprio app. Modelos maiores pedem mais RAM."
         ))
@@ -881,9 +883,9 @@ class SettingsWindow(QMainWindow):
             "QPushButton:hover { background-color: #FF91A4; }"
         )
         self.local_dl_btn.clicked.connect(self._download_local_model)
-        local_card.add_row(SettingRow("Modelo local", self.local_dl_btn))
+        self._local_card.add_row(SettingRow("Modelo local", self.local_dl_btn))
 
-        layout.addWidget(local_card)
+        layout.addWidget(self._local_card)
 
         # Status + progresso do download local
         self.local_status = QLabel("")
@@ -906,30 +908,22 @@ class SettingsWindow(QMainWindow):
         self.local_progress.hide()
         layout.addWidget(self.local_progress)
 
-        local_note = QLabel(
+        self._local_note = QLabel(
             "A IA local roda <b>100% dentro do Screvo</b>, sem programas externos "
             "e sem custo de API. Escolha o modelo Gemma conforme a sua RAM e clique "
             "em \"Baixar / Usar modelo\" — o modelo é baixado uma vez e fica salvo. "
             "A geração é por CPU; modelos maiores são mais lentos."
         )
-        local_note.setStyleSheet(
+        self._local_note.setStyleSheet(
             "color: #999; font-size: 12px; padding: 14px; "
             "background: #F3E5F5; border-radius: 10px; border: 1px solid #E1BEE7;"
         )
-        local_note.setWordWrap(True)
-        local_note.setTextFormat(Qt.TextFormat.RichText)
-        layout.addWidget(local_note)
+        self._local_note.setWordWrap(True)
+        self._local_note.setTextFormat(Qt.TextFormat.RichText)
+        layout.addWidget(self._local_note)
 
-        note = QLabel(
-            "Para provedores pagos: configure provedor, modelo e API key. Depois, na "
-            "aba Vídeos, use \"Resumir IA\", \"Chat\" ou \"Relatório Completo\"."
-        )
-        note.setStyleSheet(
-            "color: #999; font-size: 12px; padding: 20px; "
-            "background: #FFF5F7; border-radius: 10px; border: 1px solid #FFE4E9;"
-        )
-        note.setWordWrap(True)
-        layout.addWidget(note)
+        # Mostra/esconde conforme o provedor selecionado
+        self._update_ia_visibility(self.ia_provider_combo.currentData())
 
         # Detecta a GPU em segundo plano e ajusta os modelos
         self._gpu = {"name": None, "vram_gb": None}
@@ -938,19 +932,64 @@ class SettingsWindow(QMainWindow):
         layout.addStretch()
         return scroll
 
+    def _update_ia_visibility(self, provider):
+        """IA local -> mostra placa/modelos; provedor pago -> mostra modelo/API key."""
+        is_local = (provider == "local")
+        if hasattr(self, "_paid_card"):
+            self._paid_card.setVisible(not is_local)
+        for w in ("_local_title", "_local_card", "_local_note"):
+            if hasattr(self, w):
+                getattr(self, w).setVisible(is_local)
+        if not is_local:
+            if hasattr(self, "local_status"):
+                self.local_status.hide()
+            if hasattr(self, "local_progress"):
+                self.local_progress.hide()
+
+    def _on_ia_model_input_changed(self, value):
+        """Salva o modelo digitado (por provedor, para lembrar ao trocar)."""
+        provider = self.ia_provider_combo.currentData()
+        if provider and provider != "local":
+            self._remember_model(provider, value.strip())
+        else:
+            self._save_setting("ia_model", value.strip())
+
     def _update_ia_model_placeholder(self):
         provider = self.ia_provider_combo.currentData()
         default = DEFAULT_MODELS.get(provider, "")
         self.ia_model_input.setPlaceholderText(f"Padrão: {default}" if default else "")
 
+    def _remember_model(self, provider, model):
+        """Salva o modelo ativo e o memoriza por provedor."""
+        self._save_setting("ia_model", model)
+        if provider:
+            models = dict(self.config.get("ia_models", {}) or {})
+            models[provider] = model
+            self._save_setting("ia_models", models)
+
     def _on_ia_provider_changed(self, index):
         provider = self.ia_provider_combo.itemData(index)
-        if provider is not None:
-            self._save_setting("ia_provider", provider)
+        if provider is None:
+            return
+        self._save_setting("ia_provider", provider)
+        self._update_ia_visibility(provider)
+
+        if provider == "local":
+            # Modelo controlado pelo combo local.
+            key = (self.config.get("ia_models", {}) or {}).get("local") \
+                or self.local_model_combo.currentData()
+            if key:
+                self._save_setting("ia_model", key)
+        elif provider:
+            # Restaura o modelo salvo deste provedor (ou o padrão dele) —
+            # assim trocar de provedor não carrega o modelo do outro.
+            models = self.config.get("ia_models", {}) or {}
+            model = models.get(provider, DEFAULT_MODELS.get(provider, ""))
+            self.ia_model_input.blockSignals(True)
+            self.ia_model_input.setText(model)
+            self.ia_model_input.blockSignals(False)
+            self._save_setting("ia_model", model)
         self._update_ia_model_placeholder()
-        # API key não se aplica à IA local
-        if hasattr(self, "ia_key_input"):
-            self.ia_key_input.setEnabled(provider != "local")
 
     # ---- IA local (no app) ----
     def _start_gpu_detection(self):
@@ -1024,7 +1063,7 @@ class SettingsWindow(QMainWindow):
             return
         if key:
             self._save_setting("ia_provider", "local")
-            self._save_setting("ia_model", key)
+            self._remember_model("local", key)
             pidx = self.ia_provider_combo.findData("local")
             if pidx >= 0:
                 self.ia_provider_combo.setCurrentIndex(pidx)
@@ -1042,7 +1081,7 @@ class SettingsWindow(QMainWindow):
 
         if local_llm.is_downloaded(key):
             self._save_setting("ia_provider", "local")
-            self._save_setting("ia_model", key)
+            self._remember_model("local", key)
             pidx = self.ia_provider_combo.findData("local")
             if pidx >= 0:
                 self.ia_provider_combo.setCurrentIndex(pidx)
