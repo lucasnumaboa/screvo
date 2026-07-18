@@ -173,8 +173,14 @@ class LocalTranscriber(QObject):
                 self.error.emit(f"Erro ao baixar o modelo: {str(e)}")
         threading.Thread(target=_dl, daemon=True).start()
 
+    WINDOW_SECONDS = 30
+
     def _transcribe_parakeet(self, wav_path):
-        """Transcreve o WAV (16k mono) usando Parakeet via sherpa-onnx."""
+        """Transcreve o WAV (16k mono) usando Parakeet via sherpa-onnx.
+
+        Retorna (texto_completo, segmentos), onde segmentos é uma lista de
+        {"start": seg, "end": seg, "text": str} (uma entrada por janela).
+        """
         self._ensure_sherpa()
         import sherpa_onnx
         import numpy as np
@@ -198,11 +204,14 @@ class LocalTranscriber(QObject):
             frames = wf.readframes(wf.getnframes())
         samples = np.frombuffer(frames, dtype=np.int16).astype(np.float32) / 32768.0
 
-        # Decodifica em janelas de 30s (progresso + memória controlada)
-        window = 30 * sr
+        # Decodifica em janelas (progresso + memória controlada)
+        win_sec = self.WINDOW_SECONDS
+        window = win_sec * sr
         n = len(samples)
+        duration = n / float(sr) if sr else 0.0
         total_chunks = max(1, (n + window - 1) // window)
         parts = []
+        segments = []
         self.status.emit("Transcrevendo com Parakeet...")
         for idx in range(total_chunks):
             chunk = samples[idx * window:(idx + 1) * window]
@@ -211,44 +220,131 @@ class LocalTranscriber(QObject):
             stream = recognizer.create_stream()
             stream.accept_waveform(sr, chunk)
             recognizer.decode_stream(stream)
-            txt = (stream.result.text or "").strip()
+            result = stream.result
+            txt = (result.text or "").strip()
             if txt:
                 parts.append(txt)
+                offset = idx * win_sec
+                win_end = min((idx + 1) * win_sec, duration or (idx + 1) * win_sec)
+                segments.extend(
+                    self._segments_from_result(result, offset, win_end, txt)
+                )
             self.progress.emit(idx + 1, total_chunks)
 
-        return " ".join(parts).strip()
+        return " ".join(parts).strip(), segments
 
-    def _worker(self, video_path):
+    @staticmethod
+    def _segments_from_result(result, offset, win_end, fallback_text,
+                              max_seg=6.0, min_break=2.0):
+        """Quebra o resultado em segmentos usando os timestamps por token.
+
+        Cai para um único segmento (janela inteira) se não houver timestamps.
+        """
+        tokens = list(getattr(result, "tokens", []) or [])
+        times = list(getattr(result, "timestamps", []) or [])
+        if not tokens or len(tokens) != len(times):
+            return [{"start": round(offset, 2), "end": round(win_end, 2),
+                     "text": fallback_text}]
+
+        # Reconstrói palavras a partir dos subtokens (▁ marca início de palavra)
+        words = []
+        cur, cur_start = "", None
+        for tok, t in zip(tokens, times):
+            if tok.startswith("▁"):  # ▁
+                if cur:
+                    words.append((cur_start, cur))
+                cur, cur_start = tok[1:], t
+            else:
+                if cur_start is None:
+                    cur_start = t
+                cur += tok
+        if cur:
+            words.append((cur_start, cur))
+        if not words:
+            return [{"start": round(offset, 2), "end": round(win_end, 2),
+                     "text": fallback_text}]
+
+        # Agrupa palavras em segmentos de até ~max_seg segundos
+        segs = []
+        seg_words, seg_start = [], None
+        for t, w in words:
+            if seg_start is None:
+                seg_start = t
+            seg_words.append(w)
+            dur = t - seg_start
+            ends_sentence = w[-1:] in ".!?…"
+            if dur >= max_seg or (ends_sentence and dur >= min_break):
+                segs.append({
+                    "start": round(offset + seg_start, 2),
+                    "end": round(offset + t, 2),
+                    "text": " ".join(seg_words).strip(),
+                })
+                seg_words, seg_start = [], None
+        if seg_words:
+            segs.append({
+                "start": round(offset + seg_start, 2),
+                "end": round(win_end, 2),
+                "text": " ".join(seg_words).strip(),
+            })
+        return segs
+
+    def transcribe_sync(self, video_path):
+        """Executa a transcrição de forma síncrona (para uso encadeado).
+
+        Escreve <video>.txt e <video>.segments.json e retorna
+        (txt_path, full_text, segments). Lança exceção em caso de erro.
+        Emite os sinais de status/progress normalmente.
+        """
+        import shutil
         temp_dir = tempfile.mkdtemp(prefix="vr_local_")
         wav_path = os.path.join(temp_dir, "audio.wav")
         try:
             self.status.emit("Extraindo áudio...")
             self._extract_audio(video_path, wav_path)
             if not os.path.isfile(wav_path) or os.path.getsize(wav_path) < 1000:
-                self.error.emit("Não foi possível extrair áudio do vídeo.")
-                return
+                raise RuntimeError("Não foi possível extrair áudio do vídeo.")
 
-            full_text = self._transcribe_parakeet(wav_path)
-
+            full_text, segments = self._transcribe_parakeet(wav_path)
             if not full_text:
-                self.error.emit(
+                raise RuntimeError(
                     "Nenhum texto foi transcrito. O áudio pode estar em silêncio."
                 )
-                return
+
+            # Diarização (identificação de quem falou) — opcional/best-effort.
+            try:
+                import diarizer
+                if diarizer.available():
+                    self.status.emit("Identificando falantes...")
+                    turns = diarizer.diarize(wav_path)
+                    if turns:
+                        diarizer.assign_speakers(segments, turns)
+            except Exception:
+                pass
 
             txt_path = os.path.splitext(video_path)[0] + ".txt"
             with open(txt_path, "w", encoding="utf-8") as f:
                 f.write(full_text)
 
-            self.progress.emit(100, 100)
-            self.status.emit("Transcrição concluída!")
-            self.finished.emit(txt_path)
+            try:
+                import json
+                seg_path = os.path.splitext(video_path)[0] + ".segments.json"
+                with open(seg_path, "w", encoding="utf-8") as f:
+                    json.dump(segments, f, ensure_ascii=False, indent=2)
+            except Exception:
+                pass
 
-        except Exception as e:
-            self.error.emit(f"Erro na transcrição local: {str(e)}")
+            return txt_path, full_text, segments
         finally:
             try:
-                import shutil
                 shutil.rmtree(temp_dir, ignore_errors=True)
             except Exception:
                 pass
+
+    def _worker(self, video_path):
+        try:
+            txt_path, _, _ = self.transcribe_sync(video_path)
+            self.progress.emit(100, 100)
+            self.status.emit("Transcrição concluída!")
+            self.finished.emit(txt_path)
+        except Exception as e:
+            self.error.emit(f"Erro na transcrição local: {str(e)}")

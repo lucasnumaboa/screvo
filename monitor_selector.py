@@ -236,6 +236,7 @@ class MonitorSelector(QWidget):
     """Dialog de seleção estilo Teams."""
     monitor_selected = pyqtSignal(list)  # lista de índices (-1 = todas)
     window_selected = pyqtSignal(int)    # hwnd da janela
+    region_requested = pyqtSignal()      # usuário quer selecionar uma região
     cancelled = pyqtSignal()
 
     def __init__(self, parent=None):
@@ -336,6 +337,20 @@ class MonitorSelector(QWidget):
         """)
         cancel_btn.clicked.connect(self._cancel)
         btn_layout.addWidget(cancel_btn)
+
+        region_btn = QPushButton("▭  Região")
+        region_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        region_btn.setToolTip("Selecionar uma região da tela para gravar")
+        region_btn.setStyleSheet("""
+            QPushButton {
+                background: transparent; border: 1px solid rgba(255,255,255,0.2);
+                border-radius: 8px; padding: 10px 20px; color: rgba(255,255,255,0.85);
+                font-size: 13px;
+            }
+            QPushButton:hover { background: rgba(255,105,180,0.2); border-color: #FF69B4; }
+        """)
+        region_btn.clicked.connect(self._request_region)
+        btn_layout.addWidget(region_btn)
 
         self.start_btn = QPushButton("▶  Gravar")
         self.start_btn.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -485,6 +500,11 @@ class MonitorSelector(QWidget):
             self.window_selected.emit(self.selected_window)
         elif self.selected_monitors:
             self.monitor_selected.emit(sorted(self.selected_monitors))
+
+    def _request_region(self):
+        self.hide()
+        QApplication.processEvents()
+        self.region_requested.emit()
 
     def _cancel(self):
         self.cancelled.emit()

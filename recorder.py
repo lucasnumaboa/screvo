@@ -187,13 +187,15 @@ class Recorder:
     # ------------------------------------------------------------------
     # Montagem do comando
     # ------------------------------------------------------------------
-    def build_command(self, monitor_indices, capture_all, audio_devices, output):
+    def build_command(self, monitor_indices, capture_all, audio_devices, output,
+                      region=None):
         """
         Monta comando FFmpeg para gravação de tela(s).
         monitor_indices: lista de índices de monitores (0-based) ou None
         capture_all: True para capturar todas as telas juntas
         audio_devices: lista de dispositivos dshow a gravar (pode ser vazia)
         output: caminho do arquivo de saída
+        region: (x, y, w, h) para gravar uma região específica (opcional)
         """
         ffmpeg = self.get_ffmpeg()
         fps = self.config.get("fps", 30)
@@ -201,8 +203,8 @@ class Recorder:
         cmd = [ffmpeg, "-y"]
 
         # ---------- VÍDEO ----------
-        region = None
-        if not capture_all and monitor_indices:
+        # Região explícita (seleção manual) tem prioridade.
+        if region is None and not capture_all and monitor_indices:
             try:
                 from screeninfo import get_monitors
                 monitors = get_monitors()
@@ -294,6 +296,7 @@ class Recorder:
         self.start_time = time.time()
         self.total_paused = 0
         self._output_path = output
+        self._markers = []
 
     def _reset_audio_job(self):
         self._sys_capture = None
@@ -303,8 +306,11 @@ class Recorder:
         self._final_output = None
         self._raw_has_audio = False
 
-    def start(self, monitor_indices=None, capture_all=False):
-        """Inicia gravação de tela(s), com áudio conforme o modo configurado."""
+    def start(self, monitor_indices=None, capture_all=False, region=None):
+        """Inicia gravação de tela(s), com áudio conforme o modo configurado.
+
+        region: (x, y, w, h) para gravar apenas uma região (opcional).
+        """
         with self._lock:
             if self.is_recording:
                 return None
@@ -322,7 +328,7 @@ class Recorder:
 
             try:
                 cmd = self.build_command(monitor_indices, capture_all,
-                                         ff_devices, raw_output)
+                                         ff_devices, raw_output, region=region)
             except FileNotFoundError as e:
                 return str(e)
 
@@ -339,7 +345,7 @@ class Recorder:
                     # Reconstrói o comando apontando para o arquivo final.
                     try:
                         cmd = self.build_command(monitor_indices, capture_all,
-                                                 ff_devices, raw_output)
+                                                 ff_devices, raw_output, region=region)
                     except FileNotFoundError as e:
                         return str(e)
 
@@ -473,7 +479,39 @@ class Recorder:
             # Finaliza captura do som do sistema e faz o mux, se aplicável.
             final = getattr(self, "_final_output", None) or self._output_path
             self._finalize_audio_job(final)
+            self._write_markers(final)
             return final
+
+    def add_marker(self, label=None):
+        """Registra um marcador no instante atual da gravação."""
+        if not self.is_recording:
+            return None
+        elapsed = self.get_elapsed()
+        if not hasattr(self, "_markers"):
+            self._markers = []
+        n = len(self._markers) + 1
+        marker = {"time": elapsed, "label": label or f"Marcador {n}"}
+        self._markers.append(marker)
+        return marker
+
+    def get_markers(self):
+        return list(getattr(self, "_markers", []))
+
+    def _write_markers(self, final):
+        markers = getattr(self, "_markers", None)
+        if not markers or not final:
+            return
+        try:
+            path = os.path.splitext(final)[0] + ".markers.txt"
+            with open(path, "w", encoding="utf-8") as f:
+                f.write("Marcadores da gravação\n")
+                f.write("=" * 30 + "\n\n")
+                for m in markers:
+                    t = int(m["time"])
+                    ts = f"{t // 3600:02d}:{(t % 3600) // 60:02d}:{t % 60:02d}"
+                    f.write(f"[{ts}]  {m['label']}\n")
+        except Exception:
+            pass
 
     def _finalize_audio_job(self, final):
         """Para a captura de sistema e combina vídeo + áudios no arquivo final."""

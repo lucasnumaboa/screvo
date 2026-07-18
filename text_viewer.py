@@ -8,7 +8,7 @@ import os
 
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QTextBrowser, QPushButton, QLabel,
-    QApplication
+    QApplication, QFileDialog, QMessageBox
 )
 from PyQt6.QtCore import Qt, QTimer
 
@@ -34,13 +34,17 @@ _MD_STYLE = """
 class TextViewerDialog(QDialog):
     """Diálogo simples que exibe texto ou Markdown formatado."""
 
-    def __init__(self, title, content, is_markdown=False, file_path=None, parent=None):
+    def __init__(self, title, content, is_markdown=False, file_path=None,
+                 parent=None, base_dir=None):
         super().__init__(parent)
         self.setWindowTitle(title)
         self.resize(700, 640)
         self.setMinimumSize(420, 360)
         self._file_path = file_path
         self._raw_content = content
+        self._base_dir = base_dir or (
+            os.path.dirname(file_path) if file_path else None
+        )
         self.setStyleSheet("QDialog { background: #FAFAFA; }")
 
         layout = QVBoxLayout(self)
@@ -59,6 +63,8 @@ class TextViewerDialog(QDialog):
             "border-radius: 12px; padding: 16px; font-size: 14px; color: #333; }"
         )
         if is_markdown:
+            if self._base_dir:
+                self.browser.setSearchPaths([self._base_dir])
             self.browser.document().setDefaultStyleSheet(_MD_STYLE)
             self.browser.setMarkdown(content)
         else:
@@ -78,6 +84,17 @@ class TextViewerDialog(QDialog):
         )
         self.copy_btn.clicked.connect(self._copy_content)
         btn_row.addWidget(self.copy_btn)
+
+        self.export_btn = QPushButton("⤓  Exportar")
+        self.export_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.export_btn.setStyleSheet(
+            "QPushButton { background: #E3F2FD; border: 1px solid #90CAF9; "
+            "border-radius: 8px; padding: 8px 18px; font-size: 13px; "
+            "color: #1565C0; font-weight: 600; }"
+            "QPushButton:hover { background: #BBDEFB; }"
+        )
+        self.export_btn.clicked.connect(self._export)
+        btn_row.addWidget(self.export_btn)
 
         btn_row.addStretch()
 
@@ -111,6 +128,43 @@ class TextViewerDialog(QDialog):
         QTimer.singleShot(
             1800, lambda: self.copy_btn.setText("📋  Copiar conteúdo")
         )
+
+    def _export(self):
+        """Exporta o conteúdo para .md, .docx ou .pdf."""
+        base = "resumo"
+        start_dir = ""
+        if self._file_path:
+            base = os.path.splitext(os.path.basename(self._file_path))[0]
+            start_dir = os.path.dirname(self._file_path)
+        default = os.path.join(start_dir, base + ".md") if start_dir else base + ".md"
+
+        path, selected = QFileDialog.getSaveFileName(
+            self, "Exportar", default,
+            "Markdown (*.md);;Documento Word (*.docx);;PDF (*.pdf)"
+        )
+        if not path:
+            return
+
+        # Garante a extensão de acordo com o filtro escolhido
+        ext_map = {"Markdown": ".md", "Word": ".docx", "PDF": ".pdf"}
+        for key, ext in ext_map.items():
+            if key in selected and not path.lower().endswith(ext):
+                path += ext
+                break
+
+        try:
+            import exporters
+            self.export_btn.setText("Exportando...")
+            self.export_btn.setEnabled(False)
+            QApplication.processEvents()
+            exporters.export(self._raw_content, path, base_dir=self._base_dir)
+            self.export_btn.setText("✓  Exportado!")
+            QTimer.singleShot(2000, lambda: self.export_btn.setText("⤓  Exportar"))
+        except Exception as e:
+            QMessageBox.critical(self, "Erro ao exportar", str(e))
+            self.export_btn.setText("⤓  Exportar")
+        finally:
+            self.export_btn.setEnabled(True)
 
     def _open_external(self):
         if self._file_path and os.path.isfile(self._file_path):

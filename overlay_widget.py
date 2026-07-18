@@ -21,6 +21,7 @@ class OverlayWidget(QWidget):
     pause_clicked = pyqtSignal()
     stop_clicked = pyqtSignal()
     close_clicked = pyqtSignal()
+    marker_clicked = pyqtSignal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -84,6 +85,15 @@ class OverlayWidget(QWidget):
         self.timer_label.hide()
         layout.addWidget(self.timer_label)
 
+        # Botão Marcador
+        self.marker_btn = QPushButton("📌")
+        self.marker_btn.setProperty("class", "overlayBtn")
+        self.marker_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.marker_btn.setToolTip("Adicionar marcador")
+        self.marker_btn.clicked.connect(self._on_marker)
+        self.marker_btn.hide()
+        layout.addWidget(self.marker_btn)
+
         # Botão Parar
         self.stop_btn = QPushButton("⏹")
         self.stop_btn.setProperty("class", "overlayBtn")
@@ -145,6 +155,7 @@ class OverlayWidget(QWidget):
         if saving:
             self.record_btn.hide()
             self.stop_btn.hide()
+            self.marker_btn.hide()
             self.timer_label.hide()
             self.close_btn.hide()
             for dot in self.dots:
@@ -181,6 +192,7 @@ class OverlayWidget(QWidget):
             self.record_btn.setToolTip("Pausar" if not paused else "Continuar")
             self.record_btn.setProperty("recording", "true")
             self.stop_btn.show()
+            self.marker_btn.show()
             self.timer_label.show()
 
             for dot in self.dots:
@@ -197,6 +209,7 @@ class OverlayWidget(QWidget):
             self.record_btn.setToolTip("Gravar")
             self.record_btn.setProperty("recording", "false")
             self.stop_btn.hide()
+            self.marker_btn.hide()
             self.timer_label.hide()
             self.timer_label.setText("00:00:00")
 
@@ -240,6 +253,12 @@ class OverlayWidget(QWidget):
 
     def _on_stop(self):
         self.stop_clicked.emit()
+
+    def _on_marker(self):
+        self.marker_clicked.emit()
+        # Feedback visual rápido
+        self.marker_btn.setText("✓")
+        QTimer.singleShot(700, lambda: self.marker_btn.setText("📌"))
 
     def _on_close(self):
         self.close_clicked.emit()

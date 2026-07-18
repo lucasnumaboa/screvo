@@ -26,6 +26,7 @@ DEFAULT_CONFIG = {
     "ia_provider": "",         # gemini | claude | openai | deepseek
     "ia_model": "",            # nome do modelo (ex: gpt-4o-mini, gemini-1.5-flash)
     "ia_api_key": "",
+    "ia_template": "geral",    # template de resumo (ver summary_templates.py)
 }
 
 

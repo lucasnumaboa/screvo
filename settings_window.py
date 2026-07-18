@@ -12,7 +12,7 @@ from PyQt6.QtWidgets import (
     QMessageBox, QProgressBar, QListView, QSizeGrip, QComboBox as _QComboBox
 )
 from PyQt6.QtCore import Qt, QSize, QPoint, pyqtSignal
-from PyQt6.QtGui import QIcon, QColor, QFont
+from PyQt6.QtGui import QIcon, QColor, QFont, QPixmap
 from styles import MAIN_STYLESHEET
 from toggle_switch import ToggleSwitch
 from config import Config
@@ -22,6 +22,18 @@ from ai_summarizer import SummarizeWorker, DEFAULT_MODELS
 from flow_layout import FlowWidget
 from text_viewer import TextViewerDialog
 from icons import make_icon, make_app_icon
+from chat_dialog import ChatDialog
+from ocr_screen import OcrWorker
+from report_builder import AudioExtractWorker, ReportWorker
+import summary_templates
+
+# Sufixos dos arquivos associados a um vídeo (base = nome sem extensão)
+SIDECAR_SUFFIXES = [
+    ".txt", "_resumo.txt", ".segments.json", "_tela.txt", ".markers.txt",
+    "_relatorio.md", ".mp3",
+]
+# Subpasta com as imagens do relatório (sufixo de diretório)
+REPORT_IMG_SUFFIX = "_relatorio_arquivos"
 
 
 class TitleBar(QWidget):
@@ -227,9 +239,22 @@ class SettingsWindow(QMainWindow):
         tagline = QLabel("grava e transcreve")
         tagline.setStyleSheet(
             "color: rgba(255,255,255,0.75); font-size: 11px; "
-            "padding: 0px 20px 22px 20px; font-style: italic;"
+            "padding: 0px 20px 10px 20px; font-style: italic;"
         )
         sidebar_layout.addWidget(tagline)
+
+        # Ícone/ilustração do app (icon.png), logo abaixo do título
+        icon_path = self._find_asset("icon.png")
+        if icon_path:
+            pm = QPixmap(icon_path)
+            if not pm.isNull():
+                icon_img = QLabel()
+                icon_img.setPixmap(
+                    pm.scaledToWidth(150, Qt.TransformationMode.SmoothTransformation)
+                )
+                icon_img.setAlignment(Qt.AlignmentFlag.AlignCenter)
+                icon_img.setStyleSheet("background: transparent; padding: 2px 10px 16px 10px;")
+                sidebar_layout.addWidget(icon_img)
 
         # Botões da sidebar
         self.sidebar_buttons = []
@@ -346,6 +371,30 @@ class SettingsWindow(QMainWindow):
                     "font-size: 14px; font-weight: 500; border-radius: 8px; margin: 2px 10px; }"
                     "QPushButton:hover { background: rgba(255,255,255,0.2); color: white; }"
                 )
+
+    def _find_asset(self, name):
+        """Procura um arquivo de recurso (ex.: icon.png) em vários locais."""
+        import os
+        import sys
+        candidates = []
+        if getattr(sys, "frozen", False):
+            meipass = getattr(sys, "_MEIPASS", "")
+            if meipass:
+                candidates.append(os.path.join(meipass, name))
+                candidates.append(os.path.join(meipass, "resources", name))
+        try:
+            from config import get_app_dir
+            base = get_app_dir()
+            candidates += [
+                os.path.join(base, name),
+                os.path.join(base, "resources", name),
+            ]
+        except Exception:
+            pass
+        for c in candidates:
+            if c and os.path.isfile(c):
+                return c
+        return None
 
     def _make_scroll_page(self):
         """Cria scroll area para uma página."""
@@ -776,6 +825,21 @@ class SettingsWindow(QMainWindow):
             "Sua chave fica salva apenas neste computador."
         ))
 
+        # Template de resumo
+        self.ia_template_combo = QComboBox()
+        self.ia_template_combo.setMinimumWidth(220)
+        for key, label in summary_templates.labels():
+            self.ia_template_combo.addItem(label, key)
+        _ti = self.ia_template_combo.findData(self.config.get("ia_template", "geral"))
+        self.ia_template_combo.setCurrentIndex(_ti if _ti >= 0 else 0)
+        self.ia_template_combo.currentIndexChanged.connect(
+            lambda i: self._save_setting("ia_template", self.ia_template_combo.itemData(i))
+        )
+        card.add_row(SettingRow(
+            "Template de Resumo", self.ia_template_combo,
+            "Formato do resumo gerado (ata, tutorial, tarefas, etc.)"
+        ))
+
         layout.addWidget(card)
 
         note = QLabel(
@@ -1110,6 +1174,33 @@ class SettingsWindow(QMainWindow):
                 sub_btn.clicked.connect(lambda checked, p=path: self._create_subtitle(p))
             btns_widget.add_widget(sub_btn)
 
+            # Botão OCR (texto da tela)
+            tela_path = os.path.join(folder, video_name + "_tela.txt")
+            has_tela = os.path.isfile(tela_path)
+            if has_tela:
+                ocr_btn = QPushButton("Ver Texto Tela")
+                ocr_btn.setStyleSheet(
+                    "QPushButton { background: #E0F2F1; border: 1px solid #80CBC4; "
+                    "border-radius: 8px; padding: 6px 12px; font-size: 11px; "
+                    "color: #00695C; font-weight: 500; }"
+                    "QPushButton:hover { background: #B2DFDB; }"
+                )
+                ocr_btn.clicked.connect(
+                    lambda checked, p=tela_path, nm=video_name:
+                    self._view_text(p, False, f"Texto da Tela — {nm}")
+                )
+            else:
+                ocr_btn = QPushButton("Ler Tela (OCR)")
+                ocr_btn.setStyleSheet(
+                    "QPushButton { background: #E0F7FA; border: 1px solid #80DEEA; "
+                    "border-radius: 8px; padding: 6px 12px; font-size: 11px; "
+                    "color: #00838F; font-weight: 500; }"
+                    "QPushButton:hover { background: #B2EBF2; }"
+                )
+                ocr_btn.clicked.connect(lambda checked, p=path: self._ocr_video(p))
+            ocr_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            btns_widget.add_widget(ocr_btn)
+
             # Botão de resumo IA
             summary_path = os.path.join(folder, video_name + "_resumo.txt")
             has_summary = os.path.isfile(summary_path)
@@ -1150,6 +1241,69 @@ class SettingsWindow(QMainWindow):
                     lambda checked, p=path, sp=subtitle_path: self._summarize_ia(p, sp)
                 )
             btns_widget.add_widget(ia_btn)
+
+            # Botão Chat (perguntar à IA sobre o vídeo) — precisa de legenda
+            chat_btn = QPushButton("Chat")
+            chat_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            chat_btn.setEnabled(has_subtitle)
+            if has_subtitle:
+                chat_btn.setStyleSheet(
+                    "QPushButton { background: #FFF3E0; border: 1px solid #FFB74D; "
+                    "border-radius: 8px; padding: 6px 12px; font-size: 11px; "
+                    "color: #E65100; font-weight: 600; }"
+                    "QPushButton:hover { background: #FFE0B2; }"
+                )
+                chat_btn.clicked.connect(
+                    lambda checked, p=path, sp=subtitle_path: self._open_chat(p, sp)
+                )
+            else:
+                chat_btn.setStyleSheet(
+                    "QPushButton { background: #F5F5F5; border: 1px solid #E8E8E8; "
+                    "border-radius: 8px; padding: 6px 12px; font-size: 11px; "
+                    "color: #BBBBBB; }"
+                )
+                chat_btn.setToolTip("Crie a legenda antes de conversar com a IA")
+            btns_widget.add_widget(chat_btn)
+
+            # Botão Extrair Áudio
+            audio_btn = QPushButton("Extrair Áudio")
+            audio_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            audio_btn.setStyleSheet(
+                "QPushButton { background: #FFF8E1; border: 1px solid #FFE082; "
+                "border-radius: 8px; padding: 6px 12px; font-size: 11px; "
+                "color: #F57F17; font-weight: 500; }"
+                "QPushButton:hover { background: #FFECB3; }"
+            )
+            audio_btn.clicked.connect(lambda checked, p=path: self._extract_audio_video(p))
+            btns_widget.add_widget(audio_btn)
+
+            # Botão Relatório Completo (ou Ver Relatório se já existe)
+            report_path = os.path.join(folder, video_name + "_relatorio.md")
+            if os.path.isfile(report_path):
+                report_btn = QPushButton("Ver Relatório")
+                report_btn.setStyleSheet(
+                    "QPushButton { background: #FCE4EC; border: 1px solid #F48FB1; "
+                    "border-radius: 8px; padding: 6px 12px; font-size: 11px; "
+                    "color: #AD1457; font-weight: 700; }"
+                    "QPushButton:hover { background: #F8BBD0; }"
+                )
+                report_btn.clicked.connect(
+                    lambda checked, rp=report_path, nm=video_name:
+                    self._view_report(rp, nm)
+                )
+            else:
+                report_btn = QPushButton("★ Relatório Completo")
+                report_btn.setStyleSheet(
+                    "QPushButton { background: qlineargradient(x1:0,y1:0,x2:1,y2:0, "
+                    "stop:0 #FF69B4, stop:1 #BA68C8); border: none; "
+                    "border-radius: 8px; padding: 6px 12px; font-size: 11px; "
+                    "color: white; font-weight: 700; }"
+                    "QPushButton:hover { background: qlineargradient(x1:0,y1:0,x2:1,y2:0, "
+                    "stop:0 #FF91A4, stop:1 #CE93D8); }"
+                )
+                report_btn.clicked.connect(lambda checked, p=path: self._full_report(p))
+            report_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            btns_widget.add_widget(report_btn)
 
             # Botão Mover
             move_btn = QPushButton("Mover")
@@ -1225,17 +1379,28 @@ class SettingsWindow(QMainWindow):
                 # Renomeia vídeo
                 os.rename(video_path, new_video_path)
 
-                # Renomeia legenda se existir
-                old_sub = os.path.join(folder, old_name + ".txt")
-                if os.path.isfile(old_sub):
-                    new_sub = os.path.join(folder, new_name + ".txt")
-                    os.rename(old_sub, new_sub)
+                # Renomeia arquivos associados, se existirem.
+                for suffix in SIDECAR_SUFFIXES:
+                    old_side = os.path.join(folder, old_name + suffix)
+                    if os.path.isfile(old_side):
+                        os.rename(old_side, os.path.join(folder, new_name + suffix))
 
-                # Renomeia resumo se existir
-                old_sum = os.path.join(folder, old_name + "_resumo.txt")
-                if os.path.isfile(old_sum):
-                    new_sum = os.path.join(folder, new_name + "_resumo.txt")
-                    os.rename(old_sum, new_sum)
+                # Renomeia a pasta de imagens do relatório e corrige os links
+                old_img = os.path.join(folder, old_name + REPORT_IMG_SUFFIX)
+                new_img = os.path.join(folder, new_name + REPORT_IMG_SUFFIX)
+                if os.path.isdir(old_img):
+                    os.rename(old_img, new_img)
+                    report_md = os.path.join(folder, new_name + "_relatorio.md")
+                    if os.path.isfile(report_md):
+                        try:
+                            with open(report_md, "r", encoding="utf-8") as f:
+                                md = f.read()
+                            md = md.replace(old_name + REPORT_IMG_SUFFIX,
+                                            new_name + REPORT_IMG_SUFFIX)
+                            with open(report_md, "w", encoding="utf-8") as f:
+                                f.write(md)
+                        except Exception:
+                            pass
 
                 self._refresh_videos_list()
             except Exception as e:
@@ -1368,13 +1533,9 @@ class SettingsWindow(QMainWindow):
             return
         dest_folder = mapping[choice]
 
-        # Arquivos a mover: vídeo, legenda, resumo
+        # Arquivos a mover: vídeo + todos os associados
         ext = os.path.splitext(video_path)[1]
-        to_move = [
-            base + ext,
-            base + ".txt",
-            base + "_resumo.txt",
-        ]
+        to_move = [base + ext] + [base + s for s in SIDECAR_SUFFIXES]
         # Checa colisões
         for fname in to_move:
             src = os.path.join(src_folder, fname)
@@ -1389,6 +1550,12 @@ class SettingsWindow(QMainWindow):
                 src = os.path.join(src_folder, fname)
                 if os.path.isfile(src):
                     shutil.move(src, os.path.join(dest_folder, fname))
+            # Move a pasta de imagens do relatório, se existir
+            img_dir = os.path.join(src_folder, base + REPORT_IMG_SUFFIX)
+            if os.path.isdir(img_dir):
+                dest_img = os.path.join(dest_folder, base + REPORT_IMG_SUFFIX)
+                if not os.path.exists(dest_img):
+                    shutil.move(img_dir, dest_img)
             self._refresh_videos_list()
         except Exception as e:
             QMessageBox.critical(self, "Erro", f"Erro ao mover: {str(e)}")
@@ -1437,15 +1604,17 @@ class SettingsWindow(QMainWindow):
 
         folder = os.path.dirname(video_path)
         base = os.path.splitext(os.path.basename(video_path))[0]
-        targets = [
-            video_path,
-            os.path.join(folder, base + ".txt"),
-            os.path.join(folder, base + "_resumo.txt"),
+        targets = [video_path] + [
+            os.path.join(folder, base + s) for s in SIDECAR_SUFFIXES
         ]
         try:
             for t in targets:
                 if os.path.isfile(t):
                     os.remove(t)
+            img_dir = os.path.join(folder, base + REPORT_IMG_SUFFIX)
+            if os.path.isdir(img_dir):
+                import shutil
+                shutil.rmtree(img_dir, ignore_errors=True)
             self._refresh_videos_list()
         except Exception as e:
             QMessageBox.critical(self, "Erro", f"Erro ao excluir: {str(e)}")
@@ -1497,8 +1666,12 @@ class SettingsWindow(QMainWindow):
         self.transcribe_status.setText("Gerando resumo com IA...")
         self.transcribe_status.setStyleSheet("color: #5E35B1; font-size: 12px; font-weight: 600;")
 
+        template_key = self.config.get("ia_template", "geral")
+        instructions = summary_templates.instructions_for(template_key)
+
         self._ia_worker = SummarizeWorker(
-            provider, model, api_key, subtitle_text, video_path
+            provider, model, api_key, subtitle_text, video_path,
+            template_instructions=instructions
         )
         self._ia_worker.finished_ok.connect(self._on_summary_finished)
         self._ia_worker.failed.connect(self._on_summary_error)
@@ -1807,6 +1980,195 @@ class SettingsWindow(QMainWindow):
             title or os.path.basename(path), content, is_markdown, path, self
         )
         dlg.exec()
+
+    def _open_chat(self, video_path, subtitle_path):
+        """Abre o chat de perguntas sobre o vídeo (usa a legenda como contexto)."""
+        import os
+        if not os.path.isfile(subtitle_path):
+            QMessageBox.warning(self, "Sem Legenda",
+                                "Crie a legenda antes de conversar com a IA.")
+            return
+        provider = self.config.get("ia_provider", "")
+        model = self.config.get("ia_model", "")
+        api_key = self.config.get("ia_api_key", "")
+        if not provider.strip() or not api_key.strip():
+            QMessageBox.warning(
+                self, "IA não configurada",
+                "Configure o provedor e a API key na aba IA."
+            )
+            return
+        try:
+            with open(subtitle_path, "r", encoding="utf-8") as f:
+                transcript = f.read()
+        except Exception as e:
+            QMessageBox.critical(self, "Erro", f"Erro ao ler a legenda: {str(e)}")
+            return
+
+        nm = os.path.splitext(os.path.basename(video_path))[0]
+        dlg = ChatDialog(f"Chat — {nm}", transcript, provider, model, api_key, self)
+        dlg.exec()
+
+    def _ocr_video(self, video_path):
+        """Extrai o texto que aparece na tela do vídeo (OCR local)."""
+        import os
+        reply = QMessageBox.question(
+            self, "Ler Texto da Tela (OCR)",
+            f"Extrair o texto que aparece na tela de:\n{os.path.basename(video_path)}\n\n"
+            "Isso analisa frames do vídeo localmente e pode demorar em vídeos "
+            "longos. Continuar?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+
+        self.transcribe_status.show()
+        self.transcribe_progress.show()
+        self.transcribe_progress.setRange(0, 0)
+        self.transcribe_status.setText("Lendo texto da tela (OCR)...")
+        self.transcribe_status.setStyleSheet("color: #00838F; font-size: 12px; font-weight: 600;")
+
+        self._ocr_worker = OcrWorker(video_path)
+        self._ocr_worker.progress.connect(self._on_ocr_progress)
+        self._ocr_worker.status.connect(lambda m: self.transcribe_status.setText(m))
+        self._ocr_worker.finished_ok.connect(self._on_ocr_finished)
+        self._ocr_worker.failed.connect(self._on_ocr_error)
+        self._ocr_worker.start()
+
+    def _on_ocr_progress(self, current, total):
+        self.transcribe_progress.setRange(0, total)
+        self.transcribe_progress.setValue(current)
+
+    def _on_ocr_finished(self, txt_path, video_path):
+        import os
+        self.transcribe_progress.setRange(0, 100)
+        self.transcribe_progress.hide()
+        self.transcribe_status.setText(f"Texto da tela salvo: {os.path.basename(txt_path)}")
+        self.transcribe_status.setStyleSheet("color: #2E7D32; font-size: 12px; font-weight: 600;")
+        self._refresh_videos_list()
+        from PyQt6.QtCore import QTimer
+        QTimer.singleShot(6000, lambda: (
+            self.transcribe_status.hide(),
+            self.transcribe_status.setStyleSheet("color: #FF69B4; font-size: 12px;")
+        ))
+
+    def _on_ocr_error(self, msg, video_path=None):
+        self.transcribe_progress.setRange(0, 100)
+        self.transcribe_progress.hide()
+        self.transcribe_status.setText(f"Erro no OCR: {msg}")
+        self.transcribe_status.setStyleSheet("color: #D32F2F; font-size: 12px; font-weight: 600;")
+        QMessageBox.critical(self, "Erro no OCR", msg)
+
+    # =================== ÁUDIO / RELATÓRIO ===================
+    def _extract_audio_video(self, video_path):
+        """Extrai o áudio do vídeo para um arquivo .mp3."""
+        import os
+        self.transcribe_status.show()
+        self.transcribe_progress.show()
+        self.transcribe_progress.setRange(0, 0)
+        self.transcribe_status.setText("Extraindo áudio...")
+        self.transcribe_status.setStyleSheet("color: #F57F17; font-size: 12px; font-weight: 600;")
+
+        self._audio_worker = AudioExtractWorker(video_path, "mp3")
+        self._audio_worker.finished_ok.connect(self._on_audio_finished)
+        self._audio_worker.failed.connect(self._on_audio_error)
+        self._audio_worker.start()
+
+    def _on_audio_finished(self, out_path, video_path):
+        import os
+        self.transcribe_progress.setRange(0, 100)
+        self.transcribe_progress.hide()
+        self.transcribe_status.setText(f"Áudio salvo: {os.path.basename(out_path)}")
+        self.transcribe_status.setStyleSheet("color: #2E7D32; font-size: 12px; font-weight: 600;")
+        from PyQt6.QtCore import QTimer
+        QTimer.singleShot(5000, lambda: (
+            self.transcribe_status.hide(),
+            self.transcribe_status.setStyleSheet("color: #FF69B4; font-size: 12px;")
+        ))
+
+    def _on_audio_error(self, msg, video_path=None):
+        self.transcribe_progress.setRange(0, 100)
+        self.transcribe_progress.hide()
+        self.transcribe_status.setText(f"Erro ao extrair áudio: {msg}")
+        self.transcribe_status.setStyleSheet("color: #D32F2F; font-size: 12px; font-weight: 600;")
+        QMessageBox.critical(self, "Erro ao Extrair Áudio", msg)
+
+    def _view_report(self, report_path, video_name):
+        """Abre o relatório (Markdown com imagens) no visualizador."""
+        import os
+        try:
+            with open(report_path, "r", encoding="utf-8") as f:
+                content = f.read()
+        except Exception as e:
+            QMessageBox.critical(self, "Erro", f"Erro ao abrir o relatório: {str(e)}")
+            return
+        dlg = TextViewerDialog(
+            f"Relatório — {video_name}", content, is_markdown=True,
+            file_path=report_path, parent=self,
+            base_dir=os.path.dirname(report_path),
+        )
+        dlg.exec()
+
+    def _full_report(self, video_path):
+        """Gera o relatório completo: legenda -> OCR -> resumo IA com capturas."""
+        provider = self.config.get("ia_provider", "")
+        model = self.config.get("ia_model", "")
+        api_key = self.config.get("ia_api_key", "")
+        if not provider.strip() or not api_key.strip():
+            QMessageBox.warning(
+                self, "IA não configurada",
+                "Configure o provedor e a API key na aba IA antes de gerar o relatório."
+            )
+            return
+        if not LocalTranscriber.available():
+            QMessageBox.warning(self, "Indisponível",
+                                "A transcrição local não está disponível.")
+            return
+
+        import os
+        reply = QMessageBox.question(
+            self, "Relatório Completo",
+            f"Gerar o relatório completo de:\n{os.path.basename(video_path)}\n\n"
+            "Etapas: criar legenda → ler tela (OCR) → montar relatório com IA "
+            "(inserindo capturas do vídeo). Pode demorar. Continuar?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+
+        self.transcribe_status.show()
+        self.transcribe_progress.show()
+        self.transcribe_progress.setRange(0, 0)
+        self.transcribe_status.setText("Gerando relatório completo...")
+        self.transcribe_status.setStyleSheet("color: #AD1457; font-size: 12px; font-weight: 600;")
+
+        self._report_worker = ReportWorker(video_path, provider, model, api_key)
+        self._report_worker.status.connect(lambda m: self.transcribe_status.setText(m))
+        self._report_worker.progress.connect(self._on_ocr_progress)
+        self._report_worker.finished_ok.connect(self._on_report_finished)
+        self._report_worker.failed.connect(self._on_report_error)
+        self._report_worker.start()
+
+    def _on_report_finished(self, report_path, video_path):
+        import os
+        self.transcribe_progress.setRange(0, 100)
+        self.transcribe_progress.hide()
+        self.transcribe_status.setText(f"Relatório salvo: {os.path.basename(report_path)}")
+        self.transcribe_status.setStyleSheet("color: #2E7D32; font-size: 12px; font-weight: 600;")
+        self._refresh_videos_list()
+        nm = os.path.splitext(os.path.basename(video_path))[0]
+        self._view_report(report_path, nm)
+        from PyQt6.QtCore import QTimer
+        QTimer.singleShot(6000, lambda: (
+            self.transcribe_status.hide(),
+            self.transcribe_status.setStyleSheet("color: #FF69B4; font-size: 12px;")
+        ))
+
+    def _on_report_error(self, msg, video_path=None):
+        self.transcribe_progress.setRange(0, 100)
+        self.transcribe_progress.hide()
+        self.transcribe_status.setText(f"Erro no relatório: {msg}")
+        self.transcribe_status.setStyleSheet("color: #D32F2F; font-size: 12px; font-weight: 600;")
+        QMessageBox.critical(self, "Erro no Relatório", msg)
 
     def _open_output_folder(self):
         import os

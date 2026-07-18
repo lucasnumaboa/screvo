@@ -35,6 +35,7 @@ pyinstaller ^
     --icon "resources\icon.ico" ^
     --add-data "ffmpeg\bin\ffmpeg.exe;ffmpeg\bin" ^
     --add-data "ffmpeg\bin\ffprobe.exe;ffmpeg\bin" ^
+    --add-data "icon.png;." ^
     --hidden-import "screeninfo" ^
     --hidden-import "keyboard" ^
     --hidden-import "requests" ^

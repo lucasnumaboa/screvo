@@ -5,10 +5,13 @@ Usa QMediaPlayer (PyQt6.QtMultimedia) + QVideoWidget.
 
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
-    QSlider, QSizePolicy, QTextEdit, QSplitter, QFrame,
+    QSlider, QSizePolicy, QTextEdit, QTextBrowser, QSplitter, QFrame,
     QApplication, QStyle
 )
 from PyQt6.QtCore import Qt, QUrl, QTimer
+
+import json
+import html
 from PyQt6.QtGui import QColor, QFont
 from PyQt6.QtMultimedia import QMediaPlayer, QAudioOutput
 from PyQt6.QtMultimediaWidgets import QVideoWidget
@@ -93,14 +96,18 @@ class VideoPlayer(QWidget):
         )
         sub_layout.addWidget(sub_header)
 
-        self.subtitle_display = QTextEdit()
+        self.subtitle_display = QTextBrowser()
         self.subtitle_display.setReadOnly(True)
+        self.subtitle_display.setOpenLinks(False)
+        self.subtitle_display.setOpenExternalLinks(False)
+        self.subtitle_display.anchorClicked.connect(self._on_anchor_clicked)
         self.subtitle_display.setStyleSheet("""
-            QTextEdit {
+            QTextBrowser {
                 background: #1a1a1a; color: #DDD; font-size: 13px;
                 border: 1px solid #333; border-radius: 8px; padding: 10px;
                 line-height: 1.6;
             }
+            a { color: #FF69B4; text-decoration: none; font-weight: 600; }
         """)
         self.subtitle_display.setFont(QFont("Segoe UI", 12))
         sub_layout.addWidget(self.subtitle_display, 1)
@@ -209,21 +216,66 @@ class VideoPlayer(QWidget):
         self.player.setSource(QUrl.fromLocalFile(video_path))
         self.title_label.setText(os.path.basename(video_path))
 
-        # Carrega legenda
-        if subtitle_path and os.path.isfile(subtitle_path):
+        # Carrega legenda — prioriza segmentos com timestamps clicáveis
+        seg_path = os.path.splitext(video_path)[0] + ".segments.json"
+        loaded = False
+        if os.path.isfile(seg_path):
+            loaded = self._load_segments(seg_path)
+
+        if not loaded and subtitle_path and os.path.isfile(subtitle_path):
             try:
                 with open(subtitle_path, "r", encoding="utf-8") as f:
                     self._subtitle_text = f.read()
                 self.subtitle_display.setPlainText(self._subtitle_text)
                 self.subtitle_panel.show()
+                loaded = True
             except Exception:
-                self.subtitle_panel.hide()
-        else:
+                pass
+
+        if not loaded:
             self.subtitle_panel.hide()
             self._subtitle_text = ""
 
         self.show()
         self.raise_()
+
+    def _load_segments(self, seg_path):
+        """Renderiza segmentos com timestamps clicáveis (e falante, se houver)."""
+        try:
+            with open(seg_path, "r", encoding="utf-8") as f:
+                segments = json.load(f)
+        except Exception:
+            return False
+        if not segments:
+            return False
+
+        rows = []
+        for seg in segments:
+            start = float(seg.get("start", 0))
+            ts = self._format_time(int(start * 1000))
+            speaker = seg.get("speaker")
+            spk = (f"<b style='color:#B39DDB'>{html.escape(speaker)}</b> "
+                   if speaker else "")
+            text = html.escape(seg.get("text", ""))
+            rows.append(
+                f"<p style='margin:0 0 10px 0;'>"
+                f"<a href='seek:{start}'>[{ts}]</a> {spk}"
+                f"<span style='color:#DDD'>{text}</span></p>"
+            )
+        self._subtitle_text = "\n".join(s.get("text", "") for s in segments)
+        self.subtitle_display.setHtml("".join(rows))
+        self.subtitle_panel.show()
+        return True
+
+    def _on_anchor_clicked(self, url):
+        s = url.toString()
+        if s.startswith("seek:"):
+            try:
+                seconds = float(s.split(":", 1)[1])
+                self.player.setPosition(int(seconds * 1000))
+                self.player.play()
+            except Exception:
+                pass
 
     def _toggle_play(self):
         if self.player.playbackState() == QMediaPlayer.PlaybackState.PlayingState:

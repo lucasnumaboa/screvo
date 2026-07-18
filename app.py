@@ -58,12 +58,19 @@ class ScrevoApp:
         self.overlay.pause_clicked.connect(self._on_overlay_pause)
         self.overlay.stop_clicked.connect(self._on_overlay_stop)
         self.overlay.close_clicked.connect(self._on_overlay_close)
+        self.overlay.marker_clicked.connect(self._on_overlay_marker)
         self.overlay._update_requested.connect(self._update_overlay_time)
 
         self.monitor_selector = MonitorSelector()
         self.monitor_selector.monitor_selected.connect(self._on_monitor_selected)
         self.monitor_selector.window_selected.connect(self._on_window_selected)
+        self.monitor_selector.region_requested.connect(self._on_region_requested)
         self.monitor_selector.cancelled.connect(self._on_monitor_cancelled)
+
+        from region_selector import RegionSelector
+        self.region_selector = RegionSelector()
+        self.region_selector.region_selected.connect(self._on_region_selected)
+        self.region_selector.cancelled.connect(self._on_monitor_cancelled)
 
         # Timer para atualizar tempo no overlay
         self._time_timer = QTimer()
@@ -209,6 +216,27 @@ class ScrevoApp:
     def _on_monitor_cancelled(self):
         pass
 
+    def _on_region_requested(self):
+        """Abre o seletor de região da tela."""
+        self.region_selector.start()
+
+    def _on_region_selected(self, region):
+        """Região selecionada — inicia a gravação apenas dessa área."""
+        error = self.recorder.start(region=region)
+        if error:
+            from PyQt6.QtWidgets import QMessageBox
+            QMessageBox.critical(None, "Erro", f"Erro ao iniciar gravação:\n{error}")
+            return
+
+        pos = self.config.get("overlay_position", "bottom")
+        self.overlay.set_recording_state(True)
+        self.overlay.show_at_position(pos)
+
+        self.tray_icon.setIcon(self._create_recording_icon())
+        self.tray_icon.setToolTip("Screvo — Gravando...")
+        self._tray_record_action.setText("⏹  Parar Gravação")
+        self._time_timer.start()
+
     def _on_window_selected(self, hwnd):
         """Janela selecionada — grava via gdigrab window title."""
         # gdigrab suporta captura por título de janela
@@ -243,6 +271,18 @@ class ScrevoApp:
         """Botão pause no overlay."""
         self.recorder.toggle_pause()
         self.overlay.set_recording_state(True, self.recorder.is_paused)
+
+    def _on_overlay_marker(self):
+        """Botão de marcador no overlay — registra o instante atual."""
+        marker = self.recorder.add_marker()
+        if marker:
+            t = int(marker["time"])
+            ts = f"{t // 60:02d}:{t % 60:02d}"
+            self.tray_icon.showMessage(
+                "Marcador adicionado",
+                f"{marker['label']} em {ts}",
+                QSystemTrayIcon.MessageIcon.Information, 1500
+            )
 
     def _on_overlay_stop(self):
         """Para gravação — mostra 'Salvando...' enquanto FFmpeg finaliza."""
