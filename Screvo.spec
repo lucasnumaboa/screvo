@@ -21,7 +21,7 @@ a = Analysis(
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
-    excludes=[],
+    excludes=['winocr', 'winrt', 'llama_cpp', 'docx', 'reportlab', 'pytesseract'],
     noarchive=False,
     optimize=0,
 )

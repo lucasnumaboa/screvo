@@ -51,6 +51,12 @@ pyinstaller ^
     --hidden-import "PyQt6.QtGui" ^
     --hidden-import "PyQt6.QtMultimedia" ^
     --hidden-import "PyQt6.QtMultimediaWidgets" ^
+    --exclude-module "winocr" ^
+    --exclude-module "winrt" ^
+    --exclude-module "llama_cpp" ^
+    --exclude-module "docx" ^
+    --exclude-module "reportlab" ^
+    --exclude-module "pytesseract" ^
     main.py
 
 if errorlevel 1 (
