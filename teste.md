@@ -79,6 +79,16 @@ Marque cada item conforme testar.
 > Requer IA configurada. Se um vídeo já tem legenda/OCR, o relatório reaproveita
 > e pula essas etapas.
 
+## 11. IA local no app (Gemma)
+- [ ] Aba **IA** → seção **IA LOCAL NO APP · GEMMA** mostra seu hardware (ex.: "GPU: AMD Radeon RX 580 (8 GB) • RAM: 16 GB").
+- [ ] A GPU exibida é a que está **realmente instalada** agora (não uma antiga).
+- [ ] O combo de modelos Gemma marca o **⭐ recomendado** conforme a RAM; modelos que pedem mais RAM ficam desabilitados (o mais leve sempre fica ativo).
+- [ ] Clicar **Baixar / Usar modelo** baixa o GGUF com barra de progresso e, ao final, mostra "Modelo pronto" (instala o `llama-cpp-python` na 1ª vez).
+- [ ] Depois de baixar, **Resumir IA / Chat / Relatório** funcionam **sem API key** (provedor "IA local"), tudo dentro do app.
+
+> Roda 100% no app, sem programas externos. A geração é por CPU — modelos
+> maiores são mais lentos. Não precisa de Ollama.
+
 ---
 
 ## Regressão (o que já existia deve continuar OK)

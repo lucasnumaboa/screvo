@@ -27,6 +27,8 @@ from ocr_screen import OcrWorker
 from report_builder import ReportWorker
 from audio_player_bar import AudioPlayerBar
 import summary_templates
+import local_llm
+import gpu_info
 
 # Sufixos dos arquivos associados a um vídeo (base = nome sem extensão)
 SIDECAR_SUFFIXES = [
@@ -171,6 +173,7 @@ class SettingsWindow(QMainWindow):
     hotkey_changed = pyqtSignal(str)
     settings_changed = pyqtSignal()
     _audio_devices_loaded = pyqtSignal(list)
+    _gpu_detected = pyqtSignal(dict)
 
     def __init__(self, config: Config, parent=None):
         super().__init__(parent)
@@ -195,6 +198,7 @@ class SettingsWindow(QMainWindow):
         )
 
         self._audio_devices_loaded.connect(self._populate_audio_combo)
+        self._gpu_detected.connect(self._apply_gpu)
 
         self._setup_ui()
         self._load_settings()
@@ -779,6 +783,7 @@ class SettingsWindow(QMainWindow):
         self.ia_provider_combo = QComboBox()
         self.ia_provider_combo.setMinimumWidth(220)
         self.ia_provider_combo.addItem("— Selecione —", "")
+        self.ia_provider_combo.addItem("IA local no app — Gemma", "local")
         self.ia_provider_combo.addItem("Google Gemini", "gemini")
         self.ia_provider_combo.addItem("Claude (Anthropic)", "claude")
         self.ia_provider_combo.addItem("OpenAI", "openai")
@@ -843,11 +848,81 @@ class SettingsWindow(QMainWindow):
 
         layout.addWidget(card)
 
+        # ---------- IA LOCAL (NO APP · GEMMA) ----------
+        layout.addWidget(SectionTitle("IA LOCAL NO APP · GEMMA"))
+        local_card = SettingCard()
+
+        # Hardware detectado
+        self.gpu_label = QLabel("Detectando hardware...")
+        self.gpu_label.setStyleSheet("font-size: 12px; color: #666;")
+        self.gpu_label.setWordWrap(True)
+        local_card.add_row(SettingRow("Seu computador", self.gpu_label))
+
+        # Modelo Gemma (local)
+        self.local_model_combo = QComboBox()
+        self.local_model_combo.setMinimumWidth(240)
+        for m in local_llm.LLM_MODELS:
+            self.local_model_combo.addItem(m["label"], m["key"])
+        _cm = self.local_model_combo.findData(self.config.get("ia_model", ""))
+        if _cm >= 0:
+            self.local_model_combo.setCurrentIndex(_cm)
+        self.local_model_combo.currentIndexChanged.connect(self._on_local_model_changed)
+        local_card.add_row(SettingRow(
+            "Modelo (Gemma)", self.local_model_combo,
+            "Roda por CPU no próprio app. Modelos maiores pedem mais RAM."
+        ))
+
+        # Botão baixar/usar
+        self.local_dl_btn = QPushButton("Baixar / Usar modelo")
+        self.local_dl_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.local_dl_btn.setStyleSheet(
+            "QPushButton { background-color: #FF69B4; border: none; border-radius: 8px; "
+            "padding: 8px 18px; color: white; font-weight: 600; }"
+            "QPushButton:hover { background-color: #FF91A4; }"
+        )
+        self.local_dl_btn.clicked.connect(self._download_local_model)
+        local_card.add_row(SettingRow("Modelo local", self.local_dl_btn))
+
+        layout.addWidget(local_card)
+
+        # Status + progresso do download local
+        self.local_status = QLabel("")
+        self.local_status.setWordWrap(True)
+        self.local_status.setStyleSheet(
+            "color: #666; font-size: 12px; padding: 8px; "
+            "background: #FFF5F7; border-radius: 8px; border: 1px solid #FFE4E9;"
+        )
+        self.local_status.hide()
+        layout.addWidget(self.local_status)
+
+        self.local_progress = QProgressBar()
+        self.local_progress.setStyleSheet("""
+            QProgressBar { background: #F0F0F0; border: none; border-radius: 6px; height: 8px; }
+            QProgressBar::chunk { background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                stop:0 #FF69B4, stop:1 #FF91A4); border-radius: 6px; }
+        """)
+        self.local_progress.setFixedHeight(8)
+        self.local_progress.setTextVisible(False)
+        self.local_progress.hide()
+        layout.addWidget(self.local_progress)
+
+        local_note = QLabel(
+            "A IA local roda <b>100% dentro do Screvo</b>, sem programas externos "
+            "e sem custo de API. Escolha o modelo Gemma conforme a sua RAM e clique "
+            "em \"Baixar / Usar modelo\" — o modelo é baixado uma vez e fica salvo. "
+            "A geração é por CPU; modelos maiores são mais lentos."
+        )
+        local_note.setStyleSheet(
+            "color: #999; font-size: 12px; padding: 14px; "
+            "background: #F3E5F5; border-radius: 10px; border: 1px solid #E1BEE7;"
+        )
+        local_note.setWordWrap(True)
+        local_note.setTextFormat(Qt.TextFormat.RichText)
+        layout.addWidget(local_note)
+
         note = QLabel(
-            "Configure o provedor, o modelo e a API key. Depois, na aba Vídeos, use "
-            "o botão \"Resumir IA\" (disponível quando o vídeo já tem legenda) para "
-            "enviar a legenda ao provedor e salvar o resumo em um arquivo .txt na "
-            "mesma pasta."
+            "Para provedores pagos: configure provedor, modelo e API key. Depois, na "
+            "aba Vídeos, use \"Resumir IA\", \"Chat\" ou \"Relatório Completo\"."
         )
         note.setStyleSheet(
             "color: #999; font-size: 12px; padding: 20px; "
@@ -855,6 +930,10 @@ class SettingsWindow(QMainWindow):
         )
         note.setWordWrap(True)
         layout.addWidget(note)
+
+        # Detecta a GPU em segundo plano e ajusta os modelos
+        self._gpu = {"name": None, "vram_gb": None}
+        self._start_gpu_detection()
 
         layout.addStretch()
         return scroll
@@ -866,9 +945,162 @@ class SettingsWindow(QMainWindow):
 
     def _on_ia_provider_changed(self, index):
         provider = self.ia_provider_combo.itemData(index)
-        if provider:
+        if provider is not None:
             self._save_setting("ia_provider", provider)
         self._update_ia_model_placeholder()
+        # API key não se aplica à IA local
+        if hasattr(self, "ia_key_input"):
+            self.ia_key_input.setEnabled(provider != "local")
+
+    # ---- IA local (no app) ----
+    def _start_gpu_detection(self):
+        import threading
+
+        def worker():
+            info = {"gpu": {"name": None, "vram_gb": None}, "ram_gb": None}
+            try:
+                info["gpu"] = gpu_info.detect_gpu()
+            except Exception:
+                pass
+            try:
+                info["ram_gb"] = gpu_info.system_ram_gb()
+            except Exception:
+                pass
+            self._gpu_detected.emit(info)
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _apply_gpu(self, info):
+        self._gpu = info
+        gpu = info.get("gpu") or {}
+        ram = info.get("ram_gb")
+        name = gpu.get("name")
+        vram = gpu.get("vram_gb")
+
+        parts = []
+        if name and vram:
+            parts.append(f"GPU: {name} ({vram:.0f} GB)")
+        elif name:
+            parts.append(f"GPU: {name}")
+        else:
+            parts.append("GPU: não detectada")
+        if ram:
+            parts.append(f"RAM: {ram:.0f} GB")
+        self.gpu_label.setText("  •  ".join(parts))
+
+        self._gate_local_models(ram)
+
+    def _gate_local_models(self, ram_gb):
+        """Habilita/desabilita modelos conforme a RAM e marca o recomendado."""
+        rec = local_llm.recommend(ram_gb)
+        model = self.local_model_combo.model()
+        for i, m in enumerate(local_llm.LLM_MODELS):
+            enabled = local_llm.model_enabled(ram_gb, m)
+            item = model.item(i)
+            if item is not None:
+                item.setEnabled(enabled)
+            label = m["label"] + f"  ·  {m['note']}"
+            if m["key"] == rec:
+                label += "   ⭐ recomendado"
+            self.local_model_combo.setItemText(i, label)
+
+        # Seleciona o recomendado SEM trocar o provedor (bloqueia sinais)
+        saved = self.config.get("ia_model", "")
+        idx = self.local_model_combo.findData(saved)
+        need_default = idx < 0 or (
+            model.item(idx) is not None and not model.item(idx).isEnabled()
+        )
+        if need_default:
+            ridx = self.local_model_combo.findData(rec)
+            if ridx >= 0:
+                self.local_model_combo.blockSignals(True)
+                self.local_model_combo.setCurrentIndex(ridx)
+                self.local_model_combo.blockSignals(False)
+
+    def _on_local_model_changed(self, index):
+        key = self.local_model_combo.itemData(index)
+        item = self.local_model_combo.model().item(index)
+        if item is not None and not item.isEnabled():
+            return
+        if key:
+            self._save_setting("ia_provider", "local")
+            self._save_setting("ia_model", key)
+            pidx = self.ia_provider_combo.findData("local")
+            if pidx >= 0:
+                self.ia_provider_combo.setCurrentIndex(pidx)
+
+    def _download_local_model(self):
+        key = self.local_model_combo.currentData()
+        item = self.local_model_combo.model().item(self.local_model_combo.currentIndex())
+        if item is not None and not item.isEnabled():
+            QMessageBox.warning(
+                self, "Modelo pesado demais",
+                "Este modelo pede mais RAM do que o seu computador tem. "
+                "Escolha um modelo mais leve."
+            )
+            return
+
+        if local_llm.is_downloaded(key):
+            self._save_setting("ia_provider", "local")
+            self._save_setting("ia_model", key)
+            pidx = self.ia_provider_combo.findData("local")
+            if pidx >= 0:
+                self.ia_provider_combo.setCurrentIndex(pidx)
+            self.local_status.show()
+            self.local_status.setText("✅ Modelo já baixado e pronto (IA local ativa).")
+            self.local_status.setStyleSheet(
+                "color: #2E7D32; font-size: 12px; padding: 8px; "
+                "background: #E8F5E9; border-radius: 8px; border: 1px solid #A5D6A7;"
+            )
+            return
+
+        # Define como provedor/modelo ativo e baixa
+        self._save_setting("ia_provider", "local")
+        self._save_setting("ia_model", key)
+        pidx = self.ia_provider_combo.findData("local")
+        if pidx >= 0:
+            self.ia_provider_combo.setCurrentIndex(pidx)
+
+        self.local_dl_btn.setEnabled(False)
+        self.local_status.show()
+        self.local_status.setStyleSheet(
+            "color: #666; font-size: 12px; padding: 8px; "
+            "background: #FFF5F7; border-radius: 8px; border: 1px solid #FFE4E9;"
+        )
+        self.local_progress.show()
+        self.local_progress.setRange(0, 0)
+        self.local_status.setText("Iniciando download...")
+
+        self._local_worker = local_llm.GgufDownloadWorker(key)
+        self._local_worker.progress.connect(self._on_local_progress)
+        self._local_worker.status.connect(lambda m: self.local_status.setText(m))
+        self._local_worker.finished_ok.connect(self._on_local_dl_done)
+        self._local_worker.failed.connect(self._on_local_dl_error)
+        self._local_worker.start()
+
+    def _on_local_progress(self, current, total):
+        self.local_progress.setRange(0, total)
+        self.local_progress.setValue(current)
+
+    def _on_local_dl_done(self, key):
+        self.local_progress.setRange(0, 100)
+        self.local_progress.setValue(100)
+        self.local_progress.hide()
+        self.local_dl_btn.setEnabled(True)
+        self.local_status.setText("✅ Modelo pronto! A IA local está ativa (sem API).")
+        self.local_status.setStyleSheet(
+            "color: #2E7D32; font-size: 12px; padding: 8px; "
+            "background: #E8F5E9; border-radius: 8px; border: 1px solid #A5D6A7;"
+        )
+
+    def _on_local_dl_error(self, msg):
+        self.local_progress.hide()
+        self.local_dl_btn.setEnabled(True)
+        self.local_status.setText(f"Erro ao baixar: {msg}")
+        self.local_status.setStyleSheet(
+            "color: #D32F2F; font-size: 12px; padding: 8px; "
+            "background: #FFEBEE; border-radius: 8px; border: 1px solid #EF9A9A;"
+        )
 
     # =================== VÍDEOS ===================
     def _create_videos_page(self):

@@ -35,7 +35,10 @@ overlay flutuante e ícone na bandeja.
 - 🎵 **Player de áudio embutido** em cada vídeo (ouve o áudio direto na lista).
 
 ### IA
-- 🤖 Provedor à escolha: **Gemini, Claude, OpenAI ou DeepSeek**.
+- 🤖 Provedor à escolha: **Gemini, Claude, OpenAI, DeepSeek** ou **IA local**.
+- 🖥️ **IA local no app (Gemma)** — roda 100% dentro do Screvo (via `llama.cpp`),
+  **sem programas externos e sem custo de API**. O app detecta seu hardware,
+  sugere o modelo Gemma conforme a RAM e baixa o modelo (GGUF) com progresso.
 - 📝 **Resumo** em Markdown com **templates** (geral, ata, tutorial, doc técnica, tarefas, changelog).
 - 💬 **Chat sobre o vídeo** — perguntas e respostas usando a transcrição como contexto.
 - ⭐ **Relatório Completo** — encadeia legenda → OCR → IA e gera um relatório em
@@ -60,7 +63,7 @@ pip install -r requirements.txt
 
 Algumas funções instalam suas dependências sozinhas na 1ª vez (rodando do
 código-fonte): `sherpa-onnx` (transcrição), `winocr` (OCR), `python-docx` e
-`reportlab` (exportar docx/pdf).
+`reportlab` (exportar docx/pdf) e `llama-cpp-python` (IA local no app).
 
 ### FFmpeg
 
@@ -107,6 +110,15 @@ e o **template de resumo**. A chave fica salva só no seu computador
 | Claude    | `claude-3-5-sonnet-20241022`  |
 | Gemini    | `gemini-1.5-flash`            |
 | DeepSeek  | `deepseek-chat`               |
+
+### IA local no app (Gemma)
+
+Não precisa de nenhum programa externo. Na aba **IA**, seção *IA LOCAL NO APP*,
+o app mostra seu hardware (GPU/RAM) e sugere o modelo **Gemma** adequado à sua
+RAM (o mais leve funciona em quase tudo). Clique em **Baixar / Usar modelo** — o
+modelo (GGUF) é baixado uma vez, carregado dentro do Screvo (via `llama-cpp-python`,
+instalado automaticamente na 1ª vez) e a IA passa a rodar **100% local, por CPU,
+sem API key nem custo**. Modelos maiores são mais lentos na CPU.
 
 ---
 

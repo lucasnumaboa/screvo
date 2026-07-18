@@ -19,6 +19,7 @@ DEFAULT_MODELS = {
     "claude": "claude-3-5-sonnet-20241022",
     "gemini": "gemini-1.5-flash",
     "deepseek": "deepseek-chat",
+    "local": "gemma2-2b",
 }
 
 PROVIDER_LABELS = {
@@ -26,6 +27,7 @@ PROVIDER_LABELS = {
     "claude": "Claude (Anthropic)",
     "gemini": "Google Gemini",
     "deepseek": "DeepSeek",
+    "local": "IA local (no app)",
 }
 
 _SUMMARY_SYSTEM = (
@@ -112,6 +114,9 @@ def chat_answer(provider, model, api_key, transcript, question, history=None,
 def _validate(provider, api_key):
     if not (provider or "").strip():
         raise ValueError("Nenhum provedor de IA selecionado (aba IA).")
+    # A IA local roda no app e não usa API key.
+    if provider.strip().lower() == "local":
+        return
     if not (api_key or "").strip():
         raise ValueError("Nenhuma API key configurada (aba IA).")
 
@@ -130,7 +135,15 @@ def _dispatch(provider, model, api_key, system, messages, timeout):
         return _call_claude(model, api_key, system, messages, timeout)
     elif provider == "gemini":
         return _call_gemini(model, api_key, system, messages, timeout)
+    elif provider == "local":
+        return _call_local(model, system, messages)
     raise ValueError(f"Provedor desconhecido: {provider}")
+
+
+def _call_local(model, system, messages):
+    """IA local rodando no próprio app (llama.cpp / GGUF). Sem API key."""
+    import local_llm
+    return local_llm.chat(model, system, messages)
 
 
 def _call_openai(model, api_key, system, messages, timeout,
